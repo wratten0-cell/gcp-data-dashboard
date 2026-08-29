@@ -8,7 +8,7 @@ class Settings(BaseSettings):
     DEMO_MODE: bool = os.getenv("DEMO_MODE", "true").lower() in ("true", "1", "yes")
     
     # GCP Config
-    GCP_PROJECT_ID: str = os.getenv("GCP_PROJECT_ID", "demo-gcp-project")
+    GCP_PROJECT_ID: str = os.getenv("GCP_PROJECT_ID", "tribal-datum-507019-m0")
     GCP_REGION: str = os.getenv("GCP_REGION", "us-central1")
     BQ_DATASET_ID: str = os.getenv("BQ_DATASET_ID", "ecommerce_analytics")
     
