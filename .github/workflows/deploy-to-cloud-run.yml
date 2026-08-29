@@ -16,17 +16,23 @@ jobs:
   deploy:
     permissions:
       contents: 'read'
-      id-token: 'write'
+      id-token: 'write' # Required for Workload Identity Federation (Keyless)
 
     runs-on: ubuntu-latest
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
 
+      # Modern Keyless Authentication with Google Workload Identity Federation (WIF)
+      # Or fallback to Service Account JSON key if configured
       - name: Google Cloud Auth
         id: auth
         uses: google-github-actions/auth@v2
         with:
+          # If using Keyless Workload Identity (Recommended):
+          workload_identity_provider: ${{ secrets.WIF_PROVIDER }}
+          service_account: ${{ secrets.WIF_SERVICE_ACCOUNT }}
+          # If using Service Account JSON key (Legacy fallback):
           credentials_json: ${{ secrets.GCP_SA_KEY }}
 
       - name: Set up Cloud SDK
@@ -53,4 +59,4 @@ jobs:
             ENVIRONMENT=production
 
       - name: Show Cloud Run Output URL
-        run: echo "Deployed to ${{ steps.deploy.outputs.url }}"
+        run: echo "🚀 Successfully deployed to ${{ steps.deploy.outputs.url }}"
