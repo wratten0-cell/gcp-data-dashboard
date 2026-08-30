@@ -213,10 +213,7 @@ class GeminiService:
             "messages": [
                 {
                     "userMessage": {
-                        "text": message,
-                        "runtimeParams": {
-                            "timeZone": "America/New_York"
-                        }
+                        "text": message
                     }
                 }
             ],
@@ -265,10 +262,7 @@ class GeminiService:
             )
         )
 
-        user_msg = gemini_analytics.UserMessage(
-            text=message,
-            runtime_params={"time_zone": "America/New_York"}
-        )
+        user_msg = gemini_analytics.UserMessage(text=message)
 
         chat_request = gemini_analytics.ChatRequest(
             parent=f"projects/{settings.GCP_PROJECT_ID}/locations/us",
