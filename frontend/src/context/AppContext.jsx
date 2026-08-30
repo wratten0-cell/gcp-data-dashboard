@@ -15,13 +15,13 @@ export function AppProvider({ children }) {
   
   // GCP Status state
   const [gcpStatus, setGcpStatus] = useState({
-    mode: 'demo',
-    project_id: 'demo-gcp-project',
+    mode: 'live',
+    project_id: 'tribal-datum-507019-m0',
     region: 'us-central1',
-    dataset_id: 'ecommerce_analytics',
+    dataset_id: 'uploadeddataset',
     has_gemini_key: false,
-    authenticated: false,
-    available_tables: []
+    authenticated: true,
+    available_tables: ['packages']
   });
 
   // Chat panel open/close

@@ -12,12 +12,12 @@ export function ChatPanel() {
     {
       id: 'welcome',
       role: 'assistant',
-      content: `Hello! I am your **Gemini Data Intelligence Assistant** connected to Google Cloud BigQuery (\`${gcpStatus.dataset_id}\`).\n\nYou can ask me analytical questions, request BigQuery SQL queries, explore churn risks, or ask to run forecasting and anomaly detection models!`,
+      content: `Hello! I am your **Gemini Data Intelligence Assistant** connected to Google Cloud BigQuery (\`tribal-datum-507019-m0.uploadeddataset.packages\`).\n\nYou can ask me questions about your package types, shipping volumes, total revenues, or ask for custom visualizations!`,
       thoughts: [],
       suggestions: [
-        'Analyze customer churn risk by segment',
-        'Forecast revenue for the next 30 days',
-        'Detect unusual spikes in BQ slot utilization',
+        'How many Ground Advantage packages were there?',
+        'What is the total revenue by package type?',
+        'Show revenue dot plot distribution',
       ],
     },
   ]);
