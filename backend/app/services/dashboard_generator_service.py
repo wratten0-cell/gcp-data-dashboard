@@ -7,32 +7,12 @@ from app.config import settings
 
 logger = logging.getLogger("dashboard_generator")
 
-# In-memory store for generated dashboards (seeded with default templates)
+# In-memory store for user-generated dashboards (empty until user creates one)
 _SAVED_DASHBOARDS: Dict[str, Dict[str, Any]] = {}
 
 class DashboardGeneratorService:
     def __init__(self):
-        self._seed_default_dashboards()
-
-    def _seed_default_dashboards(self):
-        """Initializes default dashboards."""
-        pkg_dash = self.generate_from_prompt("Package Logistics & Revenue Distribution Analysis")
-        pkg_dash["id"] = "dash-packages-revenue-intelligence"
-        pkg_dash["title"] = "Packages by Type & Revenue Distribution"
-        pkg_dash["is_default"] = True
-        _SAVED_DASHBOARDS[pkg_dash["id"]] = pkg_dash
-
-        churn_dash = self.generate_from_prompt("Customer Retention & Churn Risk Intelligence")
-        churn_dash["id"] = "dash-churn-risk-intelligence"
-        churn_dash["title"] = "Customer Retention & Churn Risk Intelligence"
-        churn_dash["is_default"] = True
-        _SAVED_DASHBOARDS[churn_dash["id"]] = churn_dash
-
-        finops_dash = self.generate_from_prompt("GCP FinOps & BigQuery Slot Performance")
-        finops_dash["id"] = "dash-gcp-finops-performance"
-        finops_dash["title"] = "GCP FinOps & BigQuery Slot Performance"
-        finops_dash["is_default"] = True
-        _SAVED_DASHBOARDS[finops_dash["id"]] = finops_dash
+        pass
 
     def list_dashboards(self) -> List[Dict[str, Any]]:
         """Returns all available custom and pre-built dashboards."""
