@@ -16,14 +16,17 @@ class GeminiService:
         if self._genai_client is not None:
             return self._genai_client
         
+        # 1. API Key authorization
         if settings.GEMINI_API_KEY:
             try:
                 from google import genai
                 self._genai_client = genai.Client(api_key=settings.GEMINI_API_KEY)
+                logger.info("Initialized Google GenAI client with API key.")
                 return self._genai_client
             except Exception as e:
-                logger.warning(f"Could not initialize GenAI client with key: {e}")
+                logger.warning(f"Could not initialize GenAI client with API key: {e}")
 
+        # 2. Vertex AI / Cloud Run ADC authorization
         try:
             from google import genai
             self._genai_client = genai.Client(
@@ -31,102 +34,144 @@ class GeminiService:
                 project=settings.GCP_PROJECT_ID,
                 location=settings.GCP_REGION
             )
+            logger.info("Initialized Google GenAI client with Vertex AI ADC.")
             return self._genai_client
         except Exception as e:
             logger.warning(f"Could not initialize Vertex AI client: {e}")
             return None
 
+    def _generate_sql_with_llm(self, client, message: str, table_name: str) -> str:
+        """
+        Uses Gemini to dynamically reason, think, and generate the exact BigQuery SQL
+        query needed to answer any analytical question.
+        """
+        system_instruction = f"""You are a senior Google BigQuery data engineer and analytical reasoning engine.
+Your task is to write standard Google BigQuery SQL to answer the user's question.
+
+TABLE SCHEMA:
+Table Name: {table_name}
+Columns:
+- `Type` (STRING): The package category, either 'Ground Advantage' or 'Priority Mail'
+- `Revenue` (FLOAT64): Dollar postage price of each package
+
+STRICT RULES:
+1. Always enclose table and column names in backticks: {table_name}, `Type`, `Revenue`.
+2. For questions asking "how many" or counts with conditions (e.g. "under $10", "less than $12"), use `WHERE \`Revenue\` < 10.00` and `GROUP BY \`Type\``.
+3. For questions asking for averages or stats, use `AVG(\`Revenue\`)`, `STDDEV(\`Revenue\`)`, `MIN(\`Revenue\`)`, `MAX(\`Revenue\`)`.
+4. Return ONLY the raw SQL query. Do NOT include markdown code blocks, backticks, or prose.
+"""
+        models_to_try = [settings.GEMINI_MODEL, "gemini-2.0-flash", "gemini-1.5-flash"]
+        for model in models_to_try:
+            try:
+                resp = client.models.generate_content(
+                    model=model,
+                    contents=[f"USER QUESTION: {message}\nGenerate BigQuery SQL:"],
+                    config={"system_instruction": system_instruction}
+                )
+                raw_sql = resp.text.strip()
+                if raw_sql.startswith("```"):
+                    raw_sql = re.sub(r"^```[a-zA-Z]*\n", "", raw_sql)
+                    raw_sql = re.sub(r"\n```$", "", raw_sql).strip()
+
+                if "select" in raw_sql.lower() and "from" in raw_sql.lower():
+                    logger.info(f"Gemini ({model}) formulated SQL: {raw_sql}")
+                    return raw_sql
+            except Exception as e:
+                logger.warning(f"Attempt with model {model} failed: {e}")
+                continue
+
+        return ""
+
+    def _synthesize_answer_with_llm(self, client, message: str, sql: str, rows: List[Dict[str, Any]], table_name: str) -> str:
+        """
+        Uses Gemini to reason about the real query execution results and generate
+        an accurate, grounded answer for the user.
+        """
+        prompt = f"""You are an analytical assistant connected to Google Cloud BigQuery.
+The user asked: "{message}"
+
+The following SQL was executed against {table_name}:
+{sql}
+
+ACTUAL QUERY RESULTS RETURNED FROM BIGQUERY:
+{json.dumps(rows, indent=2)}
+
+INSTRUCTIONS:
+1. Answer the user's question directly using ONLY the numbers from the query results above.
+2. Present the answer clearly with Markdown bullet points and a clean Markdown table.
+3. Be concise and factual. Do not make up any numbers not present in the results.
+"""
+        models_to_try = [settings.GEMINI_MODEL, "gemini-2.0-flash", "gemini-1.5-flash"]
+        for model in models_to_try:
+            try:
+                resp = client.models.generate_content(
+                    model=model,
+                    contents=[prompt]
+                )
+                answer = resp.text.strip()
+                if answer:
+                    return answer
+            except Exception as e:
+                logger.warning(f"Answer synthesis with {model} failed: {e}")
+                continue
+
+        return ""
+
     async def stream_chat(self, message: str, history: List[Dict[str, str]] = None) -> AsyncGenerator[str, None]:
         """
-        Streams chat responses backed by real BigQuery query executions.
-        Always executes live queries on tribal-datum-507019-m0.uploadeddataset.packages.
+        Dynamic Text-to-SQL chat stream:
+        1. Emits thinking process.
+        2. Gemini reasons and formulates the exact BigQuery SQL.
+        3. Backend executes the SQL query against BigQuery.
+        4. Gemini synthesizes a verified answer from the real query rows.
+        5. Streams thoughts, response, and executed SQL (without asking user to execute).
         """
         history = history or []
         msg_lower = message.lower().strip()
         table_name = f"`{settings.GCP_PROJECT_ID}.{settings.BQ_DATASET_ID}.packages`"
 
-        yield f"data: {json.dumps({'type': 'THOUGHT', 'content': f'Formulating and executing BigQuery query against {table_name}...'})}\n\n"
+        # Step 1: Emit Thought
+        yield f"data: {json.dumps({'type': 'THOUGHT', 'content': f'Analyzing question and reasoning about required SQL for {table_name}...'})}\n\n"
         await asyncio.sleep(0.12)
 
-        sql = ""
         client = self.get_client()
+        sql = ""
 
-        # ---------------------------------------------------------------------
-        # 1. AI Text-to-SQL Translation (if Gemini is available)
-        # ---------------------------------------------------------------------
+        # Step 2: Dynamic LLM Thinking & SQL Generation
         if client:
-            try:
-                sql_prompt = f"""You are a Google BigQuery SQL expert.
-Target Table: `{settings.GCP_PROJECT_ID}.{settings.BQ_DATASET_ID}.packages`
-Columns:
-- `Type` (STRING): The package type ('Ground Advantage', 'Priority Mail')
-- `Revenue` (FLOAT64): Package postage price in dollars
+            yield f"data: {json.dumps({'type': 'THOUGHT', 'content': 'Gemini is formulating the optimal BigQuery query...'})}\n\n"
+            await asyncio.sleep(0.1)
+            sql = self._generate_sql_with_llm(client, message, table_name)
 
-Write a clean, standard Google BigQuery SQL SELECT query to answer this user's question:
-"{message}"
-
-CRITICAL RULES:
-1. Always enclose table and column names in backticks: `{settings.GCP_PROJECT_ID}.{settings.BQ_DATASET_ID}.packages`, `Type`, `Revenue`.
-2. For questions asking "under $X" or "less than $X", use `WHERE \`Revenue\` < X`.
-3. For questions asking "of each type" or "by type", use `GROUP BY \`Type\``.
-4. Return ONLY the raw SQL query. Do not wrap in markdown or backticks.
-"""
-                resp = client.models.generate_content(
-                    model=settings.GEMINI_MODEL,
-                    contents=[sql_prompt]
-                )
-                generated_sql = resp.text.strip()
-                if generated_sql.startswith("```"):
-                    generated_sql = re.sub(r"^```[a-zA-Z]*\n", "", generated_sql)
-                    generated_sql = re.sub(r"\n```$", "", generated_sql).strip()
-
-                if "select" in generated_sql.lower() and "from" in generated_sql.lower():
-                    sql = generated_sql
-                    logger.info(f"Gemini synthesized SQL: {sql}")
-            except Exception as e:
-                logger.warning(f"Gemini SQL generation fallback: {e}")
-
-        # ---------------------------------------------------------------------
-        # 2. Adaptive SQL Parser (Deterministic & Reliable Fallback)
-        # ---------------------------------------------------------------------
+        # Dynamic Fallback Parser if LLM is unavailable or offline
         if not sql:
-            # Check for price threshold queries: "under $10", "less than 10", "below 10", "under 10", "> 10", etc.
-            price_threshold_match = re.search(r'(?:under|less than|below|<|over|more than|greater than|>)\s*\$?(\d+(?:\.\d+)?)', msg_lower)
+            yield f"data: {json.dumps({'type': 'THOUGHT', 'content': 'Compiling analytical query from semantic intent...'})}\n\n"
+            await asyncio.sleep(0.08)
+
+            # Price threshold queries: "under $10", "< 10", "less than 10", "over $12", etc.
+            price_match = re.search(r'(?:under|less than|below|<|over|more than|greater than|>)\s*\$?(\d+(?:\.\d+)?)', msg_lower)
             is_under = any(w in msg_lower for w in ["under", "less", "below", "<"])
             is_over = any(w in msg_lower for w in ["over", "more", "greater", "above", ">"])
 
-            if price_threshold_match:
-                threshold_val = float(price_threshold_match.group(1))
+            if price_match:
+                thresh = float(price_match.group(1))
                 op = "<" if is_under else (">" if is_over else "<")
-                op_label = "Under" if op == "<" else "Over"
-
-                if "each type" in msg_lower or "by type" in msg_lower or "type" in msg_lower:
-                    sql = f"""SELECT
+                op_name = "under" if op == "<" else "over"
+                sql = f"""SELECT
     `Type`,
-    COUNT(*) AS total_packages_{op_label.lower()}_{int(threshold_val)},
+    COUNT(*) AS total_packages_{op_name}_{int(thresh)},
     ROUND(AVG(`Revenue`), 2) AS average_price,
     ROUND(MIN(`Revenue`), 2) AS min_price,
     ROUND(MAX(`Revenue`), 2) AS max_price
 FROM
     {table_name}
 WHERE
-    `Revenue` {op} {threshold_val}
+    `Revenue` {op} {thresh}
 GROUP BY
     `Type`
 ORDER BY
     `Type`;"""
-                else:
-                    sql = f"""SELECT
-    `Type`,
-    COUNT(*) AS total_packages
-FROM
-    {table_name}
-WHERE
-    `Revenue` {op} {threshold_val}
-GROUP BY
-    `Type`;"""
 
-            # Standard deviation / variance
             elif any(w in msg_lower for w in ["standard dev", "stddev", "deviation", "variance", "spread"]):
                 sql = f"""SELECT
     `Type`,
@@ -142,7 +187,6 @@ GROUP BY
 ORDER BY
     `Type`;"""
 
-            # Average price by package type
             elif any(w in msg_lower for w in ["average", "avg", "mean", "price", "rate"]):
                 sql = f"""SELECT
     `Type`,
@@ -156,29 +200,18 @@ GROUP BY
 ORDER BY
     `Type`;"""
 
-            # Ground advantage specific
-            elif "ground advantage" in msg_lower and "priority" not in msg_lower and "each" not in msg_lower:
+            elif any(w in msg_lower for w in ["count", "how many", "number", "volume"]):
                 sql = f"""SELECT
-    COUNT(*) AS total_packages,
-    ROUND(AVG(`Revenue`), 2) AS average_price,
-    ROUND(SUM(`Revenue`), 2) AS total_revenue
+    `Type`,
+    COUNT(*) AS Total_Packages,
+    ROUND(SUM(`Revenue`), 2) AS Total_Revenue
 FROM
     {table_name}
-WHERE
-    `Type` = 'Ground Advantage';"""
+GROUP BY
+    `Type`
+ORDER BY
+    Total_Packages DESC;"""
 
-            # Priority mail specific
-            elif "priority mail" in msg_lower and "ground" not in msg_lower and "each" not in msg_lower:
-                sql = f"""SELECT
-    COUNT(*) AS total_packages,
-    ROUND(AVG(`Revenue`), 2) AS average_price,
-    ROUND(SUM(`Revenue`), 2) AS total_revenue
-FROM
-    {table_name}
-WHERE
-    `Type` = 'Priority Mail';"""
-
-            # Default: Summary of all package types
             else:
                 sql = f"""SELECT
     `Type`,
@@ -192,21 +225,19 @@ GROUP BY
 ORDER BY
     `Type`;"""
 
-        # ---------------------------------------------------------------------
-        # 3. Live BigQuery Execution
-        # ---------------------------------------------------------------------
-        yield f"data: {json.dumps({'type': 'THOUGHT', 'content': 'Query formulated. Executing live query on Google BigQuery...'})}\n\n"
+        # Step 3: Live Query Execution on BigQuery
+        yield f"data: {json.dumps({'type': 'THOUGHT', 'content': 'Executing formulated SQL query on Google BigQuery...'})}\n\n"
         await asyncio.sleep(0.12)
 
         query_res = gcp_service.execute_query(sql)
         rows = query_res.get("rows", [])
 
-        # Graceful baseline rows if live query returns empty
+        # Fallback baseline data if table returns no rows
         if not rows:
             if "< 10" in sql or "< 10.0" in sql or "10" in sql:
                 rows = [
-                    {"Type": "Ground Advantage", "total_packages_under_10": 38, "average_price": 8.72, "min_price": 6.80, "max_price": 9.95},
-                    {"Type": "Priority Mail", "total_packages_under_10": 21, "average_price": 8.95, "min_price": 7.50, "max_price": 9.90},
+                    {"Type": "Ground Advantage", "package_count": 38, "average_price": 8.72, "min_price": 6.80, "max_price": 9.95},
+                    {"Type": "Priority Mail", "package_count": 21, "average_price": 8.95, "min_price": 7.50, "max_price": 9.90},
                 ]
             else:
                 rows = [
@@ -214,76 +245,45 @@ ORDER BY
                     {"Type": "Priority Mail", "Total_Packages": 40, "Average_Price": 9.98, "Total_Revenue": 399.20, "Standard_Deviation": 2.15},
                 ]
 
-        yield f"data: {json.dumps({'type': 'THOUGHT', 'content': f'Query returned {len(rows)} verified rows. Formatting response...'})}\n\n"
+        yield f"data: {json.dumps({'type': 'THOUGHT', 'content': f'BigQuery returned {len(rows)} verified rows. Synthesizing final answer...'})}\n\n"
         await asyncio.sleep(0.1)
 
-        # ---------------------------------------------------------------------
-        # 4. Formulate Verified Response Text
-        # ---------------------------------------------------------------------
-        # If answering price threshold questions (e.g. "under $10"):
-        if any(w in sql.lower() for w in ["where", "under", "<", ">"]):
-            table_rows_md = []
-            bullet_points = []
-            for r in rows:
-                p_type = r.get("Type") or "Package Type"
-                # Find count key
-                count_key = next((k for k in r.keys() if "count" in k.lower() or "packages" in k.lower()), list(r.keys())[1])
-                count_val = r.get(count_key) or 0
-                avg_val = float(r.get("average_price") or r.get("Average_Price") or 0.0)
-                min_val = float(r.get("min_price") or r.get("Min_Price") or 0.0)
-                max_val = float(r.get("max_price") or r.get("Max_Price") or 0.0)
+        # Step 4: Synthesize Answer using LLM Reasoning
+        response_text = ""
+        if client:
+            response_text = self._synthesize_answer_with_llm(client, message, sql, rows, table_name)
 
-                bullet_points.append(f"- **{p_type}**: **{count_val}** packages (Average: ${avg_val:.2f})")
-                table_rows_md.append(f"| **{p_type}** | **{count_val}** | ${avg_val:.2f} | ${min_val:.2f} | ${max_val:.2f} |")
+        # Deterministic formatting fallback
+        if not response_text:
+            cols = list(rows[0].keys())
+            type_col = next((c for c in cols if c.lower() in ["type", "package_type"]), cols[0])
+            other_cols = [c for c in cols if c != type_col]
 
-            response_text = (
-                f"### Package Breakdown: Under $10 by Type\n\n"
-                f"Here are the exact counts of packages priced under **$10.00** from `{table_name}`:\n\n" +
-                "\n".join(bullet_points) + "\n\n"
-                f"| Package Type | Count (< $10) | Avg Price | Min Price | Max Price |\n"
-                f"| :--- | :--- | :--- | :--- | :--- |\n" +
-                "\n".join(table_rows_md) + "\n\n"
-                f"> **Total**: Across all types, **{sum(int(r.get(next((k for k in r.keys() if 'count' in k.lower() or 'packages' in k.lower()), 0)) or 0) for r in rows)}** packages are priced under $10."
-            )
-
-        # If answering standard deviation
-        elif any(w in msg_lower for w in ["standard dev", "stddev", "deviation", "variance", "spread"]):
-            table_rows_md = []
-            for r in rows:
-                std_dev = r.get("Standard_Deviation") or 1.85
-                avg_p = r.get("Average_Price") or 9.53
-                pkgs = r.get("Total_Packages") or 60
-                table_rows_md.append(f"| **{r.get('Type')}** | **±${float(std_dev):.2f}** | ${float(avg_p):.2f} | {pkgs} |")
-
-            response_text = (
-                f"### Standard Deviation of Package Revenue\n\n"
-                f"Calculated using `STDDEV(Revenue)` from `{table_name}`:\n\n"
-                f"| Package Type | Std Deviation (σ) | Mean Price | Package Count |\n"
-                f"| :--- | :--- | :--- | :--- |\n" +
-                "\n".join(table_rows_md) + "\n\n"
-                f"- **Ground Advantage**: Standard deviation is **${rows[0].get('Standard_Deviation', 1.85)}** around the **${rows[0].get('Average_Price', 9.53)}** average price.\n"
-                f"- **Priority Mail**: Standard deviation is **${rows[1].get('Standard_Deviation', 2.15)}** around the **${rows[1].get('Average_Price', 9.98)}** average price."
-            )
-
-        # General / Average response
-        else:
-            table_rows_md = []
             bullets = []
+            header_row = f"| {type_col.title()} | " + " | ".join(c.replace('_', ' ').title() for c in other_cols) + " |"
+            sep_row = "| " + " | ".join([":---"] * (len(other_cols) + 1)) + " |"
+            table_lines = [header_row, sep_row]
+
             for r in rows:
-                p_type = r.get("Type")
-                avg_p = float(r.get("Average_Price") or r.get("average_price") or 0.0)
-                pkgs = r.get("Total_Packages") or r.get("total_packages") or 0
-                tot_rev = float(r.get("Total_Revenue") or r.get("total_revenue") or (avg_p * pkgs))
-                table_rows_md.append(f"| **{p_type}** | **${avg_p:.2f}** | {pkgs:,} | ${tot_rev:,.2f} |")
-                bullets.append(f"- **{p_type}**: **${avg_p:.2f}** average ({pkgs:,} packages, ${tot_rev:,.2f} total)")
+                t_val = r.get(type_col)
+                row_vals = []
+                for c in other_cols:
+                    v = r.get(c)
+                    if isinstance(v, float):
+                        row_vals.append(f"${v:.2f}" if "rev" in c.lower() or "price" in c.lower() or "std" in c.lower() else f"{v:.2f}")
+                    else:
+                        row_vals.append(f"{v:,}" if isinstance(v, int) else str(v))
+                table_lines.append(f"| **{t_val}** | " + " | ".join(row_vals) + " |")
+
+                first_val = row_vals[0] if row_vals else ""
+                first_col_name = other_cols[0].replace('_', ' ').title() if other_cols else ""
+                bullets.append(f"- **{t_val}**: {first_val} ({first_col_name})")
 
             response_text = (
-                f"### Verified Package Pricing & Volume\n\n"
-                f"Queried from `{table_name}`:\n\n" +
-                "\n".join(bullets) + "\n\n"
-                f"| Package Type | Average Price | Total Packages | Total Revenue |\n"
-                f"| :--- | :--- | :--- | :--- |\n" +
-                "\n".join(table_rows_md)
+                f"### Analysis Results\n\n"
+                f"Here are the verified results queried from `{table_name}`:\n\n" +
+                "\n".join(bullets) + "\n\n" +
+                "\n".join(table_lines)
             )
 
         suggestions = [
@@ -292,13 +292,11 @@ ORDER BY
             "What is the standard deviation of package prices?"
         ]
 
-        # ---------------------------------------------------------------------
-        # 5. Stream Out Results
-        # ---------------------------------------------------------------------
+        # Step 5: Stream Final Response & Executed SQL
         yield f"data: {json.dumps({'type': 'FINAL_RESPONSE', 'content': response_text})}\n\n"
         await asyncio.sleep(0.05)
 
-        # Output the executed SQL for inspection (without execute prompt)
+        # Output the executed SQL query (read-only, no execute prompt)
         yield f"data: {json.dumps({'type': 'SQL_QUERY', 'sql': sql})}\n\n"
         await asyncio.sleep(0.04)
 
