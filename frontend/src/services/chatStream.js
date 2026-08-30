@@ -9,12 +9,13 @@ export async function streamChatResponse({ message, history, onThought, onConten
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
+        'Accept': 'text/event-stream',
       },
       body: JSON.stringify({ message, history }),
     });
 
     if (!response.ok) {
-      throw new Error(`Chat API error: ${response.statusText}`);
+      throw new Error(`Chat API responded with status ${response.status}: ${response.statusText}`);
     }
 
     const reader = response.body.getReader();
@@ -31,8 +32,14 @@ export async function streamChatResponse({ message, history, onThought, onConten
 
       for (const line of lines) {
         const trimmed = line.trim();
+        if (!trimmed) continue;
+
         if (trimmed.startsWith('data:')) {
-          const jsonStr = trimmed.replace('data:', '').trim();
+          let jsonStr = trimmed;
+          while (jsonStr.startsWith('data:')) {
+            jsonStr = jsonStr.substring(5).trim();
+          }
+
           if (!jsonStr) continue;
 
           try {

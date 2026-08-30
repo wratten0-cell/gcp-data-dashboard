@@ -1,7 +1,7 @@
 from fastapi import APIRouter
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from typing import List, Dict, Optional
-from sse_starlette.sse import EventSourceResponse
 from app.services.gemini_service import gemini_service
 
 router = APIRouter(prefix="/api/chat", tags=["AI Chat & Natural Language"])
@@ -16,10 +16,15 @@ async def chat_stream(payload: ChatMessagePayload):
     Streams conversational data responses via Server-Sent Events (SSE).
     Emits THOUGHT, FINAL_RESPONSE, SQL_QUERY, and SUGGESTIONS events.
     """
-    return EventSourceResponse(
+    return StreamingResponse(
         gemini_service.stream_chat(
             message=payload.message,
             history=payload.history
         ),
-        media_type="text/event-stream"
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        }
     )
