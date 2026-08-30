@@ -52,9 +52,9 @@ class DashboardGeneratorService:
         # ---------------------------------------------------------------------
         # CASE 1: Standard Deviation & Statistical Dispersion Request
         # ---------------------------------------------------------------------
-        if any(w in prompt_lower for w in ["standard dev", "stddev", "deviation", "variance", "spread", "dispersion", "stats"]):
-            title = "Revenue Standard Deviation & Statistical Dispersion"
-            desc = f"Statistical analysis of revenue standard deviation (σ), variance, and distribution spread across package types from {table_id}."
+        if any(w in prompt_lower for w in ["standard dev", "stddev", "deviation", "variance", "spread"]):
+            title = "Revenue Standard Deviation (σ)"
+            desc = f"Standard deviation of package revenue computed via STDDEV(Revenue) from {table_id}."
 
             # Calculate real standard deviation from table
             stat_sql = f"""SELECT 
@@ -95,30 +95,30 @@ ORDER BY `Type`;"""
                 "prompt": prompt,
                 "kpis": [
                     {
-                        "title": "Std Dev: Ground Adv",
-                        "value": f"±${ga_std:.2f}",
-                        "change": f"Mean ${ga_mean:.2f}",
+                        "title": "Std Dev: Ground Advantage",
+                        "value": f"${ga_std:.2f}",
+                        "change": "Standard Deviation (σ)",
                         "is_positive": True,
                         "icon": "Activity"
                     },
                     {
                         "title": "Std Dev: Priority Mail",
-                        "value": f"±${pm_std:.2f}",
-                        "change": f"Mean ${pm_mean:.2f}",
+                        "value": f"${pm_std:.2f}",
+                        "change": "Standard Deviation (σ)",
                         "is_positive": True,
                         "icon": "Activity"
                     },
                     {
                         "title": "Ground Adv Variance",
-                        "value": f"{ga_std**2:.2f} σ²",
-                        "change": f"Range ${ga_mean-ga_std:.2f} - ${ga_mean+ga_std:.2f}",
+                        "value": f"{ga_std**2:.2f}",
+                        "change": "Variance (σ²)",
                         "is_positive": True,
                         "icon": "TrendingUp"
                     },
                     {
                         "title": "Priority Mail Variance",
-                        "value": f"{pm_std**2:.2f} σ²",
-                        "change": f"Range ${pm_mean-pm_std:.2f} - ${pm_mean+pm_std:.2f}",
+                        "value": f"{pm_std**2:.2f}",
+                        "change": "Variance (σ²)",
                         "is_positive": True,
                         "icon": "TrendingUp"
                     }
@@ -126,50 +126,16 @@ ORDER BY `Type`;"""
                 "charts": [
                     {
                         "id": f"chart-{uuid.uuid4().hex[:6]}",
-                        "title": "Mean Revenue with ±1 Standard Deviation Range",
+                        "title": "Standard Deviation of Revenue ($)",
                         "type": "bar",
-                        "description": "Average revenue per package type with upper and lower standard deviation confidence intervals.",
-                        "sql": f"SELECT `Type`, ROUND(AVG(`Revenue`), 2) as mean, ROUND(STDDEV(`Revenue`), 2) as std_dev FROM {table_id} GROUP BY `Type`;",
+                        "description": f"Standard deviation in revenue dollars across both package types calculated using STDDEV(Revenue) in BigQuery.",
+                        "sql": f"SELECT `Type`, ROUND(STDDEV(`Revenue`), 2) AS Standard_Deviation FROM {table_id} GROUP BY `Type`;",
                         "option": {
                             "tooltip": {
                                 "trigger": "axis",
-                                "formatter": function_str_placeholder if False else "{b}<br/>Mean: ${c0}<br/>±1 StdDev: ${c1}"
+                                "axisPointer": {"type": "shadow"},
+                                "formatter": "{b}: <strong>${c}</strong> Standard Deviation"
                             },
-                            "legend": {"data": ["Average Revenue ($)", "Std Deviation (±$)"], "top": 0},
-                            "xAxis": {
-                                "type": "category",
-                                "data": ["Ground Advantage", "Priority Mail"],
-                                "axisLabel": {"fontSize": 12, "fontWeight": "bold"}
-                            },
-                            "yAxis": {"type": "value", "name": "Revenue ($)", "axisLabel": {"formatter": "${value}"}},
-                            "series": [
-                                {
-                                    "name": "Average Revenue ($)",
-                                    "type": "bar",
-                                    "data": [ga_mean, pm_mean],
-                                    "itemStyle": {"color": "#3b82f6", "borderRadius": [6, 6, 0, 0]},
-                                    "barWidth": "30%",
-                                    "label": {"show": True, "position": "top", "formatter": "${c}"}
-                                },
-                                {
-                                    "name": "Std Deviation (±$)",
-                                    "type": "bar",
-                                    "data": [ga_std, pm_std],
-                                    "itemStyle": {"color": "#f59e0b", "borderRadius": [6, 6, 0, 0]},
-                                    "barWidth": "30%",
-                                    "label": {"show": True, "position": "top", "formatter": "±${c}"}
-                                }
-                            ]
-                        }
-                    },
-                    {
-                        "id": f"chart-{uuid.uuid4().hex[:6]}",
-                        "title": "Revenue Dispersion & StdDev Spread (Dot Distribution)",
-                        "type": "scatter",
-                        "description": f"Individual package price scatter illustrating deviation from the ${ga_mean:.2f} and ${pm_mean:.2f} means.",
-                        "sql": f"SELECT `Type`, `Revenue` FROM {table_id} LIMIT 100;",
-                        "option": {
-                            "tooltip": {"trigger": "item", "formatter": "{b}: ${c}"},
                             "xAxis": {
                                 "type": "category",
                                 "data": ["Ground Advantage", "Priority Mail"],
@@ -177,32 +143,29 @@ ORDER BY `Type`;"""
                             },
                             "yAxis": {
                                 "type": "value",
-                                "name": "Price ($)",
+                                "name": "Std Dev ($)",
                                 "axisLabel": {"formatter": "${value}"}
                             },
-                            "series": [{
-                                "name": "Package Price",
-                                "type": "scatter",
-                                "symbolSize": 14,
-                                "data": [
-                                    ["Ground Advantage", round(ga_mean - ga_std * 0.9, 2)],
-                                    ["Ground Advantage", round(ga_mean - ga_std * 0.4, 2)],
-                                    ["Ground Advantage", round(ga_mean, 2)],
-                                    ["Ground Advantage", round(ga_mean + ga_std * 0.5, 2)],
-                                    ["Ground Advantage", round(ga_mean + ga_std * 0.9, 2)],
-                                    ["Priority Mail", round(pm_mean - pm_std * 0.8, 2)],
-                                    ["Priority Mail", round(pm_mean - pm_std * 0.3, 2)],
-                                    ["Priority Mail", round(pm_mean, 2)],
-                                    ["Priority Mail", round(pm_mean + pm_std * 0.6, 2)],
-                                    ["Priority Mail", round(pm_mean + pm_std * 0.95, 2)]
-                                ],
-                                "itemStyle": {
-                                    "color": "#10b981",
-                                    "borderColor": "#ffffff",
-                                    "borderWidth": 1.5,
-                                    "shadowBlur": 4
+                            "series": [
+                                {
+                                    "name": "Standard Deviation",
+                                    "type": "bar",
+                                    "data": [ga_std, pm_std],
+                                    "itemStyle": {
+                                        "color": "#f59e0b",
+                                        "borderRadius": [8, 8, 0, 0]
+                                    },
+                                    "barWidth": "35%",
+                                    "label": {
+                                        "show": True,
+                                        "position": "top",
+                                        "formatter": "${c}",
+                                        "fontSize": 12,
+                                        "fontWeight": "bold",
+                                        "color": "#f59e0b"
+                                    }
                                 }
-                            }]
+                            ]
                         }
                     }
                 ]
@@ -211,36 +174,36 @@ ORDER BY `Type`;"""
         # ---------------------------------------------------------------------
         # CASE 2: Average Price & Rate Comparison Request
         # ---------------------------------------------------------------------
-        elif any(w in prompt_lower for w in ["average", "avg", "mean", "rate", "cost"]):
+        elif any(w in prompt_lower for w in ["average", "avg", "mean", "price", "rate"]):
             dashboard_obj = {
                 "id": dash_id,
-                "title": "Package Average Price & Rate Analysis",
-                "description": f"Detailed comparison of average revenue per package from {table_id}.",
+                "title": "Average Price by Package Type",
+                "description": f"Average price per package from {table_id}.",
                 "created_at": created_at,
                 "prompt": prompt,
                 "kpis": [
                     {"title": "Ground Advantage Avg", "value": "$9.53", "change": "60 Packages", "is_positive": True, "icon": "DollarSign"},
                     {"title": "Priority Mail Avg", "value": "$9.98", "change": "40 Packages", "is_positive": True, "icon": "DollarSign"},
                     {"title": "Overall Avg Price", "value": "$9.71", "change": "Blended Average", "is_positive": True, "icon": "TrendingUp"},
-                    {"title": "Rate Differential", "value": "+$0.45", "change": "+4.7% for Priority", "is_positive": True, "icon": "Activity"},
+                    {"title": "Difference", "value": "+$0.45", "change": "Priority Mail Premium", "is_positive": True, "icon": "Activity"},
                 ],
                 "charts": [
                     {
                         "id": f"chart-{uuid.uuid4().hex[:6]}",
                         "title": "Average Price per Package ($)",
                         "type": "bar",
-                        "description": "Direct comparison of average package price between Ground Advantage and Priority Mail.",
-                        "sql": f"SELECT `Type`, ROUND(AVG(`Revenue`), 2) as Average_Price FROM {table_id} GROUP BY `Type`;",
+                        "description": "Average revenue per package calculated using AVG(Revenue).",
+                        "sql": f"SELECT `Type`, ROUND(AVG(`Revenue`), 2) AS Average_Price FROM {table_id} GROUP BY `Type`;",
                         "option": {
-                            "tooltip": {"trigger": "axis"},
-                            "xAxis": {"type": "category", "data": ["Ground Advantage", "Priority Mail"]},
-                            "yAxis": {"type": "value", "name": "Avg Price ($)", "min": 8.0, "axisLabel": {"formatter": "${value}"}},
+                            "tooltip": {"trigger": "axis", "formatter": "{b}: <strong>${c}</strong> Average Price"},
+                            "xAxis": {"type": "category", "data": ["Ground Advantage", "Priority Mail"], "axisLabel": {"fontSize": 12, "fontWeight": "bold"}},
+                            "yAxis": {"type": "value", "name": "Price ($)", "min": 8.0, "axisLabel": {"formatter": "${value}"}},
                             "series": [{
                                 "data": [9.53, 9.98],
                                 "type": "bar",
                                 "itemStyle": {"color": "#3b82f6", "borderRadius": [8, 8, 0, 0]},
                                 "barWidth": "35%",
-                                "label": {"show": True, "position": "top", "formatter": "${c}"}
+                                "label": {"show": True, "position": "top", "formatter": "${c}", "fontWeight": "bold"}
                             }]
                         }
                     }
@@ -254,7 +217,7 @@ ORDER BY `Type`;"""
             dashboard_obj = {
                 "id": dash_id,
                 "title": f"{prompt.strip().title()}",
-                "description": f"Custom analytics generated from {table_id} for: '{prompt}'.",
+                "description": f"Analytics view from {table_id} for: '{prompt}'.",
                 "created_at": created_at,
                 "prompt": prompt,
                 "kpis": [
@@ -266,9 +229,9 @@ ORDER BY `Type`;"""
                 "charts": [
                     {
                         "id": f"chart-{uuid.uuid4().hex[:6]}",
-                        "title": "Average Revenue & Package Count Comparison",
+                        "title": "Package Volume & Price Comparison",
                         "type": "bar",
-                        "description": f"Volume vs pricing from {table_id}.",
+                        "description": f"Comparison from {table_id}.",
                         "sql": f"SELECT `Type`, COUNT(*) as Total_Packages, ROUND(AVG(`Revenue`), 2) as Average_Price FROM {table_id} GROUP BY `Type`;",
                         "option": {
                             "tooltip": {"trigger": "axis"},
