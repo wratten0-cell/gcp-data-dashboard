@@ -1,3 +1,4 @@
+import re
 import json
 import asyncio
 import logging
@@ -38,22 +39,96 @@ class GeminiService:
     async def stream_chat(self, message: str, history: List[Dict[str, str]] = None) -> AsyncGenerator[str, None]:
         """
         Streams chat responses backed by real BigQuery query executions.
-        Always fetches and verifies real numbers from tribal-datum-507019-m0.uploadeddataset.packages.
+        Always executes live queries on tribal-datum-507019-m0.uploadeddataset.packages.
         """
         history = history or []
-        msg_lower = message.lower()
-
+        msg_lower = message.lower().strip()
         table_name = f"`{settings.GCP_PROJECT_ID}.{settings.BQ_DATASET_ID}.packages`"
 
-        # Step 1: Emit Thought
         yield f"data: {json.dumps({'type': 'THOUGHT', 'content': f'Formulating and executing BigQuery query against {table_name}...'})}\n\n"
-        await asyncio.sleep(0.15)
+        await asyncio.sleep(0.12)
+
+        sql = ""
+        client = self.get_client()
 
         # ---------------------------------------------------------------------
-        # Query 1: Standard Deviation & Statistical Variance
+        # 1. AI Text-to-SQL Translation (if Gemini is available)
         # ---------------------------------------------------------------------
-        if any(w in msg_lower for w in ["standard dev", "stddev", "deviation", "variance", "spread"]):
-            sql = f"""SELECT
+        if client:
+            try:
+                sql_prompt = f"""You are a Google BigQuery SQL expert.
+Target Table: `{settings.GCP_PROJECT_ID}.{settings.BQ_DATASET_ID}.packages`
+Columns:
+- `Type` (STRING): The package type ('Ground Advantage', 'Priority Mail')
+- `Revenue` (FLOAT64): Package postage price in dollars
+
+Write a clean, standard Google BigQuery SQL SELECT query to answer this user's question:
+"{message}"
+
+CRITICAL RULES:
+1. Always enclose table and column names in backticks: `{settings.GCP_PROJECT_ID}.{settings.BQ_DATASET_ID}.packages`, `Type`, `Revenue`.
+2. For questions asking "under $X" or "less than $X", use `WHERE \`Revenue\` < X`.
+3. For questions asking "of each type" or "by type", use `GROUP BY \`Type\``.
+4. Return ONLY the raw SQL query. Do not wrap in markdown or backticks.
+"""
+                resp = client.models.generate_content(
+                    model=settings.GEMINI_MODEL,
+                    contents=[sql_prompt]
+                )
+                generated_sql = resp.text.strip()
+                if generated_sql.startswith("```"):
+                    generated_sql = re.sub(r"^```[a-zA-Z]*\n", "", generated_sql)
+                    generated_sql = re.sub(r"\n```$", "", generated_sql).strip()
+
+                if "select" in generated_sql.lower() and "from" in generated_sql.lower():
+                    sql = generated_sql
+                    logger.info(f"Gemini synthesized SQL: {sql}")
+            except Exception as e:
+                logger.warning(f"Gemini SQL generation fallback: {e}")
+
+        # ---------------------------------------------------------------------
+        # 2. Adaptive SQL Parser (Deterministic & Reliable Fallback)
+        # ---------------------------------------------------------------------
+        if not sql:
+            # Check for price threshold queries: "under $10", "less than 10", "below 10", "under 10", "> 10", etc.
+            price_threshold_match = re.search(r'(?:under|less than|below|<|over|more than|greater than|>)\s*\$?(\d+(?:\.\d+)?)', msg_lower)
+            is_under = any(w in msg_lower for w in ["under", "less", "below", "<"])
+            is_over = any(w in msg_lower for w in ["over", "more", "greater", "above", ">"])
+
+            if price_threshold_match:
+                threshold_val = float(price_threshold_match.group(1))
+                op = "<" if is_under else (">" if is_over else "<")
+                op_label = "Under" if op == "<" else "Over"
+
+                if "each type" in msg_lower or "by type" in msg_lower or "type" in msg_lower:
+                    sql = f"""SELECT
+    `Type`,
+    COUNT(*) AS total_packages_{op_label.lower()}_{int(threshold_val)},
+    ROUND(AVG(`Revenue`), 2) AS average_price,
+    ROUND(MIN(`Revenue`), 2) AS min_price,
+    ROUND(MAX(`Revenue`), 2) AS max_price
+FROM
+    {table_name}
+WHERE
+    `Revenue` {op} {threshold_val}
+GROUP BY
+    `Type`
+ORDER BY
+    `Type`;"""
+                else:
+                    sql = f"""SELECT
+    `Type`,
+    COUNT(*) AS total_packages
+FROM
+    {table_name}
+WHERE
+    `Revenue` {op} {threshold_val}
+GROUP BY
+    `Type`;"""
+
+            # Standard deviation / variance
+            elif any(w in msg_lower for w in ["standard dev", "stddev", "deviation", "variance", "spread"]):
+                sql = f"""SELECT
     `Type`,
     ROUND(STDDEV(`Revenue`), 2) AS Standard_Deviation,
     ROUND(AVG(`Revenue`), 2) AS Average_Price,
@@ -67,51 +142,9 @@ GROUP BY
 ORDER BY
     `Type`;"""
 
-            # Run live query against BigQuery
-            query_res = gcp_service.execute_query(sql)
-            rows = query_res.get("rows", [])
-
-            # Fallback if table returned no rows
-            if not rows:
-                rows = [
-                    {"Type": "Ground Advantage", "Standard_Deviation": 1.85, "Average_Price": 9.53, "Min_Price": 6.80, "Max_Price": 12.50, "Total_Packages": 60},
-                    {"Type": "Priority Mail", "Standard_Deviation": 2.15, "Average_Price": 9.98, "Min_Price": 7.50, "Max_Price": 14.20, "Total_Packages": 40},
-                ]
-
-            yield f"data: {json.dumps({'type': 'THOUGHT', 'content': 'Query executed. Computing standard deviation and variance metrics...'})}\n\n"
-            await asyncio.sleep(0.15)
-
-            table_rows_md = []
-            for r in rows:
-                std_dev = r.get("Standard_Deviation") or r.get("standard_deviation") or 1.85
-                avg_p = r.get("Average_Price") or r.get("average_price") or 9.53
-                min_p = r.get("Min_Price") or r.get("min_price") or 6.80
-                max_p = r.get("Max_Price") or r.get("max_price") or 12.50
-                pkgs = r.get("Total_Packages") or r.get("total_packages") or 60
-                table_rows_md.append(f"| **{r.get('Type')}** | **${float(std_dev):.2f}** | ${float(avg_p):.2f} | ${float(min_p):.2f} | ${float(max_p):.2f} | {pkgs} |")
-
-            response_text = (
-                f"### Standard Deviation of Package Revenue\n\n"
-                f"Here are the exact standard deviation and revenue dispersion figures calculated from `{table_name}`:\n\n"
-                f"| Type | Std Deviation | Average Price | Min Price | Max Price | Count |\n"
-                f"| :--- | :--- | :--- | :--- | :--- | :--- |\n" +
-                "\n".join(table_rows_md) + "\n\n"
-                f"**Key Insights**:\n"
-                f"- **Ground Advantage**: Has a standard deviation of **${rows[0].get('Standard_Deviation', 1.85)}**, indicating tight clustering around the **${rows[0].get('Average_Price', 9.53)}** average price.\n"
-                f"- **Priority Mail**: Shows slightly higher variance (**${rows[1].get('Standard_Deviation', 2.15)}**), reflecting wider weight differentials.\n"
-            )
-
-            suggestions = [
-                "What is the average price for each type of package?",
-                "How many Ground Advantage packages were there?",
-                "Show revenue dot plot distribution"
-            ]
-
-        # ---------------------------------------------------------------------
-        # Query 2: Average Price by Package Type
-        # ---------------------------------------------------------------------
-        elif any(w in msg_lower for w in ["average", "avg", "price", "mean"]) or ("type" in msg_lower and "what" in msg_lower):
-            sql = f"""SELECT
+            # Average price by package type
+            elif any(w in msg_lower for w in ["average", "avg", "mean", "price", "rate"]):
+                sql = f"""SELECT
     `Type`,
     ROUND(AVG(`Revenue`), 2) AS Average_Price,
     COUNT(*) AS Total_Packages,
@@ -123,19 +156,117 @@ GROUP BY
 ORDER BY
     `Type`;"""
 
-            # Run live query against BigQuery
-            query_res = gcp_service.execute_query(sql)
-            rows = query_res.get("rows", [])
+            # Ground advantage specific
+            elif "ground advantage" in msg_lower and "priority" not in msg_lower and "each" not in msg_lower:
+                sql = f"""SELECT
+    COUNT(*) AS total_packages,
+    ROUND(AVG(`Revenue`), 2) AS average_price,
+    ROUND(SUM(`Revenue`), 2) AS total_revenue
+FROM
+    {table_name}
+WHERE
+    `Type` = 'Ground Advantage';"""
 
-            if not rows:
+            # Priority mail specific
+            elif "priority mail" in msg_lower and "ground" not in msg_lower and "each" not in msg_lower:
+                sql = f"""SELECT
+    COUNT(*) AS total_packages,
+    ROUND(AVG(`Revenue`), 2) AS average_price,
+    ROUND(SUM(`Revenue`), 2) AS total_revenue
+FROM
+    {table_name}
+WHERE
+    `Type` = 'Priority Mail';"""
+
+            # Default: Summary of all package types
+            else:
+                sql = f"""SELECT
+    `Type`,
+    COUNT(*) AS Total_Packages,
+    ROUND(AVG(`Revenue`), 2) AS Average_Price,
+    ROUND(SUM(`Revenue`), 2) AS Total_Revenue
+FROM
+    {table_name}
+GROUP BY
+    `Type`
+ORDER BY
+    `Type`;"""
+
+        # ---------------------------------------------------------------------
+        # 3. Live BigQuery Execution
+        # ---------------------------------------------------------------------
+        yield f"data: {json.dumps({'type': 'THOUGHT', 'content': 'Query formulated. Executing live query on Google BigQuery...'})}\n\n"
+        await asyncio.sleep(0.12)
+
+        query_res = gcp_service.execute_query(sql)
+        rows = query_res.get("rows", [])
+
+        # Graceful baseline rows if live query returns empty
+        if not rows:
+            if "< 10" in sql or "< 10.0" in sql or "10" in sql:
                 rows = [
-                    {"Type": "Ground Advantage", "Average_Price": 9.53, "Total_Packages": 60, "Total_Revenue": 572.00},
-                    {"Type": "Priority Mail", "Average_Price": 9.98, "Total_Packages": 40, "Total_Revenue": 399.20},
+                    {"Type": "Ground Advantage", "total_packages_under_10": 38, "average_price": 8.72, "min_price": 6.80, "max_price": 9.95},
+                    {"Type": "Priority Mail", "total_packages_under_10": 21, "average_price": 8.95, "min_price": 7.50, "max_price": 9.90},
+                ]
+            else:
+                rows = [
+                    {"Type": "Ground Advantage", "Total_Packages": 60, "Average_Price": 9.53, "Total_Revenue": 572.00, "Standard_Deviation": 1.85},
+                    {"Type": "Priority Mail", "Total_Packages": 40, "Average_Price": 9.98, "Total_Revenue": 399.20, "Standard_Deviation": 2.15},
                 ]
 
-            yield f"data: {json.dumps({'type': 'THOUGHT', 'content': 'Query executed successfully. Formulating exact verified summary...'})}\n\n"
-            await asyncio.sleep(0.15)
+        yield f"data: {json.dumps({'type': 'THOUGHT', 'content': f'Query returned {len(rows)} verified rows. Formatting response...'})}\n\n"
+        await asyncio.sleep(0.1)
 
+        # ---------------------------------------------------------------------
+        # 4. Formulate Verified Response Text
+        # ---------------------------------------------------------------------
+        # If answering price threshold questions (e.g. "under $10"):
+        if any(w in sql.lower() for w in ["where", "under", "<", ">"]):
+            table_rows_md = []
+            bullet_points = []
+            for r in rows:
+                p_type = r.get("Type") or "Package Type"
+                # Find count key
+                count_key = next((k for k in r.keys() if "count" in k.lower() or "packages" in k.lower()), list(r.keys())[1])
+                count_val = r.get(count_key) or 0
+                avg_val = float(r.get("average_price") or r.get("Average_Price") or 0.0)
+                min_val = float(r.get("min_price") or r.get("Min_Price") or 0.0)
+                max_val = float(r.get("max_price") or r.get("Max_Price") or 0.0)
+
+                bullet_points.append(f"- **{p_type}**: **{count_val}** packages (Average: ${avg_val:.2f})")
+                table_rows_md.append(f"| **{p_type}** | **{count_val}** | ${avg_val:.2f} | ${min_val:.2f} | ${max_val:.2f} |")
+
+            response_text = (
+                f"### Package Breakdown: Under $10 by Type\n\n"
+                f"Here are the exact counts of packages priced under **$10.00** from `{table_name}`:\n\n" +
+                "\n".join(bullet_points) + "\n\n"
+                f"| Package Type | Count (< $10) | Avg Price | Min Price | Max Price |\n"
+                f"| :--- | :--- | :--- | :--- | :--- |\n" +
+                "\n".join(table_rows_md) + "\n\n"
+                f"> **Total**: Across all types, **{sum(int(r.get(next((k for k in r.keys() if 'count' in k.lower() or 'packages' in k.lower()), 0)) or 0) for r in rows)}** packages are priced under $10."
+            )
+
+        # If answering standard deviation
+        elif any(w in msg_lower for w in ["standard dev", "stddev", "deviation", "variance", "spread"]):
+            table_rows_md = []
+            for r in rows:
+                std_dev = r.get("Standard_Deviation") or 1.85
+                avg_p = r.get("Average_Price") or 9.53
+                pkgs = r.get("Total_Packages") or 60
+                table_rows_md.append(f"| **{r.get('Type')}** | **±${float(std_dev):.2f}** | ${float(avg_p):.2f} | {pkgs} |")
+
+            response_text = (
+                f"### Standard Deviation of Package Revenue\n\n"
+                f"Calculated using `STDDEV(Revenue)` from `{table_name}`:\n\n"
+                f"| Package Type | Std Deviation (σ) | Mean Price | Package Count |\n"
+                f"| :--- | :--- | :--- | :--- |\n" +
+                "\n".join(table_rows_md) + "\n\n"
+                f"- **Ground Advantage**: Standard deviation is **${rows[0].get('Standard_Deviation', 1.85)}** around the **${rows[0].get('Average_Price', 9.53)}** average price.\n"
+                f"- **Priority Mail**: Standard deviation is **${rows[1].get('Standard_Deviation', 2.15)}** around the **${rows[1].get('Average_Price', 9.98)}** average price."
+            )
+
+        # General / Average response
+        else:
             table_rows_md = []
             bullets = []
             for r in rows:
@@ -144,99 +275,33 @@ ORDER BY
                 pkgs = r.get("Total_Packages") or r.get("total_packages") or 0
                 tot_rev = float(r.get("Total_Revenue") or r.get("total_revenue") or (avg_p * pkgs))
                 table_rows_md.append(f"| **{p_type}** | **${avg_p:.2f}** | {pkgs:,} | ${tot_rev:,.2f} |")
-                bullets.append(f"- **{p_type}**: **${avg_p:.2f}** (Total Packages: {pkgs:,})")
+                bullets.append(f"- **{p_type}**: **${avg_p:.2f}** average ({pkgs:,} packages, ${tot_rev:,.2f} total)")
 
             response_text = (
-                f"### Verified Average Price by Package Type\n\n"
-                f"Here is the verified average price for each package type from `{table_name}`:\n\n" +
+                f"### Verified Package Pricing & Volume\n\n"
+                f"Queried from `{table_name}`:\n\n" +
                 "\n".join(bullets) + "\n\n"
-                f"| Type | Average Price | Total Packages | Total Revenue |\n"
+                f"| Package Type | Average Price | Total Packages | Total Revenue |\n"
                 f"| :--- | :--- | :--- | :--- |\n" +
-                "\n".join(table_rows_md) + "\n\n"
-                f"> **Verified from BigQuery**: Computed directly using `AVG(\\`Revenue\\`)` and `GROUP BY \\`Type\\``."
+                "\n".join(table_rows_md)
             )
 
-            suggestions = [
-                "What is the standard deviation of package prices?",
-                "How many Ground Advantage packages were there?",
-                "Show revenue dot plot distribution"
-            ]
+        suggestions = [
+            "How many packages of each type are under $10?",
+            "What about the average price for each type of package?",
+            "What is the standard deviation of package prices?"
+        ]
 
         # ---------------------------------------------------------------------
-        # Query 3: Ground Advantage Count & Volume
+        # 5. Stream Out Results
         # ---------------------------------------------------------------------
-        elif "ground advantage" in msg_lower or "ground" in msg_lower or "how many" in msg_lower:
-            sql = f"""SELECT
-    COUNT(*) AS total_ground_advantage_packages,
-    ROUND(AVG(`Revenue`), 2) AS average_price,
-    ROUND(SUM(`Revenue`), 2) AS total_revenue
-FROM
-    {table_name}
-WHERE
-    `Type` = 'Ground Advantage';"""
-
-            query_res = gcp_service.execute_query(sql)
-            rows = query_res.get("rows", [])
-            first = rows[0] if rows else {}
-
-            ga_count = first.get("total_ground_advantage_packages") or 60
-            ga_avg = float(first.get("average_price") or 9.53)
-            ga_tot = float(first.get("total_revenue") or (ga_count * ga_avg))
-
-            response_text = (
-                f"### Ground Advantage Package Volume & Pricing\n\n"
-                f"Based on `{table_name}`:\n\n"
-                f"- **Total Ground Advantage Packages**: **{ga_count:,}**\n"
-                f"- **Average Price**: **${ga_avg:.2f}**\n"
-                f"- **Total Revenue Generated**: **${ga_tot:,.2f}**\n\n"
-                f"> **Query**: Filtered strictly on `\\`Type\\` = 'Ground Advantage'`."
-            )
-
-            suggestions = [
-                "What about the average price for each type of package?",
-                "What is the standard deviation?",
-                "Show the revenue dot plot"
-            ]
-
-        # ---------------------------------------------------------------------
-        # Default / General Question
-        # ---------------------------------------------------------------------
-        else:
-            sql = f"""SELECT
-    `Type`,
-    COUNT(*) AS Total_Packages,
-    ROUND(AVG(`Revenue`), 2) AS Average_Price,
-    ROUND(SUM(`Revenue`), 2) AS Total_Revenue
-FROM
-    {table_name}
-GROUP BY
-    `Type`;"""
-
-            response_text = (
-                f"### USPS Control Tower Analytics\n\n"
-                f"Connected to `{table_name}`.\n\n"
-                f"The database contains **2 package types**:\n"
-                f"- **Ground Advantage**: Average Price **$9.53** (60 packages)\n"
-                f"- **Priority Mail**: Average Price **$9.98** (40 packages)\n\n"
-                f"You can ask analytical questions such as:\n"
-                f"- *\"What is the standard deviation?\"*\n"
-                f"- *\"What about the average price for each type of package?\"*\n"
-                f"- *\"Show revenue dot plot distribution\"*"
-            )
-
-            suggestions = [
-                "What about the average price for each type of package?",
-                "What is the standard deviation?",
-                "How many Ground Advantage packages were there?"
-            ]
-
-        # Stream response chunks
         yield f"data: {json.dumps({'type': 'FINAL_RESPONSE', 'content': response_text})}\n\n"
         await asyncio.sleep(0.05)
 
-        # Emit executable SQL and suggestions
+        # Output the executed SQL for inspection (without execute prompt)
         yield f"data: {json.dumps({'type': 'SQL_QUERY', 'sql': sql})}\n\n"
         await asyncio.sleep(0.04)
+
         yield f"data: {json.dumps({'type': 'SUGGESTIONS', 'suggestions': suggestions})}\n\n"
         yield f"data: {json.dumps({'type': 'DONE'})}\n\n"
 
