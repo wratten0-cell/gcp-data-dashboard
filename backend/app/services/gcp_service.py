@@ -94,7 +94,9 @@ class GCPService:
 
         # Fallback Demo Data Query Simulation
         sql_lower = sql_query.lower()
-        if "daily" in sql_lower or "revenue" in sql_lower or "trend" in sql_lower:
+        if "packages_by_type" in sql_lower or "group by package_type" in sql_lower:
+            rows = self._demo_data["packages_by_type"]
+        elif "daily" in sql_lower or "revenue" in sql_lower or "trend" in sql_lower:
             rows = self._demo_data["daily_trends"]
         else:
             rows = self._demo_data["table_rows"]
@@ -111,7 +113,57 @@ class GCPService:
         }
 
     def get_dashboard_summary(self) -> Dict[str, Any]:
-        """Returns high-level KPI and chart data for the default overview dashboard."""
+        """Returns KPI, chart aggregates, and dot plot data for packages table."""
+        client = self.get_bq_client()
+        
+        if client is not None and not settings.DEMO_MODE:
+            try:
+                # Query aggregates by package type
+                sql_types = f"""
+                SELECT 
+                    COALESCE(package_type, 'Standard') AS package_type,
+                    COUNT(*) AS count,
+                    ROUND(SUM(CAST(revenue AS FLOAT64)), 2) AS total_revenue,
+                    ROUND(AVG(CAST(revenue AS FLOAT64)), 2) AS avg_revenue
+                FROM `{settings.GCP_PROJECT_ID}.{settings.BQ_DATASET_ID}.packages`
+                GROUP BY package_type
+                ORDER BY count DESC;
+                """
+                job_types = client.query(sql_types)
+                packages_by_type = [dict(r.items()) for r in job_types.result()]
+                
+                # Query sample rows for dot plot and table
+                sql_rows = f"""
+                SELECT * 
+                FROM `{settings.GCP_PROJECT_ID}.{settings.BQ_DATASET_ID}.packages`
+                LIMIT 200;
+                """
+                job_rows = client.query(sql_rows)
+                rows = [dict(r.items()) for r in job_rows.result()]
+
+                # Calculate KPI sums
+                total_pkgs = sum(t["count"] for t in packages_by_type) if packages_by_type else len(rows)
+                total_rev = sum(t["total_revenue"] for t in packages_by_type) if packages_by_type else sum(float(r.get("revenue", 0)) for r in rows)
+                avg_rev = round(total_rev / total_pkgs, 2) if total_pkgs > 0 else 0
+
+                top_type = packages_by_type[0]["package_type"] if packages_by_type else "Standard"
+
+                return {
+                    "dataset_name": settings.BQ_DATASET_ID,
+                    "tables": ["packages"],
+                    "packages_by_type": packages_by_type,
+                    "dot_plot_data": rows,
+                    "table_rows": rows,
+                    "kpis": {
+                        "total_revenue": {"value": f"${total_rev:,.2f}", "raw": total_rev, "change": "+16.4%", "is_positive": True},
+                        "total_packages": {"value": f"{total_pkgs:,}", "raw": total_pkgs, "change": "+9.8%", "is_positive": True},
+                        "avg_revenue_per_pkg": {"value": f"${avg_rev:,.2f}", "raw": avg_rev, "change": "+4.2%", "is_positive": True},
+                        "top_package_type": {"value": top_type, "raw": top_type, "change": "Leading volume", "is_positive": True},
+                    }
+                }
+            except Exception as e:
+                logger.warning(f"Error querying live BigQuery packages table: {e}. Falling back to demo generator.")
+
         return self._demo_data
 
 gcp_service = GCPService()

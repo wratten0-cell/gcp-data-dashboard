@@ -10,7 +10,7 @@ class Settings(BaseSettings):
     # GCP Config
     GCP_PROJECT_ID: str = os.getenv("GCP_PROJECT_ID", "tribal-datum-507019-m0")
     GCP_REGION: str = os.getenv("GCP_REGION", "us-central1")
-    BQ_DATASET_ID: str = os.getenv("BQ_DATASET_ID", "ecommerce_analytics")
+    BQ_DATASET_ID: str = os.getenv("BQ_DATASET_ID", "uploadeddataset")
     
     # Gemini Config
     GEMINI_API_KEY: Optional[str] = os.getenv("GEMINI_API_KEY", "")

@@ -3,143 +3,121 @@ import random
 from datetime import datetime, timedelta
 
 def generate_ecommerce_data():
-    base_date = datetime.now() - timedelta(days=90)
-    records = []
-    daily_revenue = []
+    base_date = datetime.now() - timedelta(days=60)
+    package_types = [
+        "Standard Ground",
+        "Express Air",
+        "Overnight Priority",
+        "Freight Heavy",
+        "Same-Day Courier",
+        "International"
+    ]
     
-    categories = ["Cloud Software", "Compute Nodes", "Enterprise Storage", "AI API Credits", "Networking Bandwidth"]
-    regions = ["us-central1 (Iowa)", "us-east4 (N. Virginia)", "europe-west1 (Belgium)", "asia-east1 (Taiwan)"]
-    segments = ["Enterprise", "Mid-Market", "SMB", "Growth Startup"]
-
-    # Generate 90 days of time-series
-    for day in range(90):
-        current_date = base_date + timedelta(days=day)
-        date_str = current_date.strftime("%Y-%m-%d")
-        
-        # Base trend with weekly seasonality
-        day_of_week = current_date.weekday()
-        weekend_factor = 0.75 if day_of_week >= 5 else 1.15
-        growth_trend = 1.0 + (day / 90.0) * 0.35  # 35% growth over 90 days
-        base_val = 14500 * growth_trend * weekend_factor
-        noise = random.uniform(-1200, 1500)
-        
-        # Inject occasional anomaly
-        anomaly = False
-        anomaly_score = 0.12
-        if day in (42, 73):
-            base_val *= 1.85
-            anomaly = True
-            anomaly_score = 0.94
-        elif day == 61:
-            base_val *= 0.45
-            anomaly = True
-            anomaly_score = 0.88
-            
-        revenue = round(base_val + noise, 2)
-        transactions = int(revenue / random.uniform(85, 140))
-        active_users = int(transactions * random.uniform(1.2, 1.8))
-        conversion_rate = round(random.uniform(2.8, 4.6), 2)
-        
-        daily_revenue.append({
-            "date": date_str,
-            "revenue": revenue,
-            "transactions": transactions,
-            "active_users": active_users,
-            "conversion_rate": conversion_rate,
-            "is_anomaly": anomaly,
-            "anomaly_score": anomaly_score
-        })
-
-    # Generate transaction level records for data table
-    statuses = ["Completed", "Completed", "Completed", "Pending", "Processing", "Flagged"]
-    customers = [
-        ("Acme Corp", "Enterprise", "us-central1 (Iowa)"),
-        ("Stripe Global", "Enterprise", "us-east4 (N. Virginia)"),
-        ("Nova Dynamics", "Mid-Market", "europe-west1 (Belgium)"),
-        ("Apex Cloudworks", "Growth Startup", "asia-east1 (Taiwan)"),
-        ("Vortex Systems", "Enterprise", "us-east4 (N. Virginia)"),
-        ("Beacon Analytics", "SMB", "us-central1 (Iowa)"),
-        ("Crestline Media", "Mid-Market", "europe-west1 (Belgium)"),
-        ("Pinnacle AI", "Growth Startup", "us-central1 (Iowa)"),
-        ("Omni Retail Group", "Enterprise", "us-east4 (N. Virginia)"),
-        ("Silverline Health", "Enterprise", "us-central1 (Iowa)"),
-        ("Solstice Labs", "Growth Startup", "asia-east1 (Taiwan)"),
-        ("Quantum Edge", "Mid-Market", "europe-west1 (Belgium)"),
-        ("Horizon Logistics", "Enterprise", "us-east4 (N. Virginia)"),
-        ("Atlas Logistics", "Mid-Market", "us-central1 (Iowa)"),
-        ("Synergy Bio", "Enterprise", "europe-west1 (Belgium)"),
+    destinations = [
+        "New York, NY", "Los Angeles, CA", "Chicago, IL", "Houston, TX", 
+        "Seattle, WA", "Atlanta, GA", "London, UK", "Frankfurt, DE", "Tokyo, JP"
     ]
 
-    for idx, (cust_name, segment, region) in enumerate(customers, start=1001):
-        amount = round(random.uniform(1200, 48000), 2)
-        churn_risk = round(random.uniform(0.05, 0.92), 2)
-        status = random.choice(statuses)
-        category = random.choice(categories)
-        days_ago = random.randint(0, 14)
-        tx_date = (datetime.now() - timedelta(days=days_ago, hours=random.randint(1, 23))).strftime("%Y-%m-%d %H:%M")
+    # Package counts & base revenue parameters per type
+    type_profiles = {
+        "Standard Ground": {"count": 1420, "min_rev": 15.0, "max_rev": 180.0, "avg_weight": 4.5},
+        "Express Air": {"count": 890, "min_rev": 65.0, "max_rev": 350.0, "avg_weight": 6.2},
+        "Overnight Priority": {"count": 620, "min_rev": 120.0, "max_rev": 580.0, "avg_weight": 8.0},
+        "Freight Heavy": {"count": 310, "min_rev": 450.0, "max_rev": 2400.0, "avg_weight": 85.0},
+        "Same-Day Courier": {"count": 480, "min_rev": 40.0, "max_rev": 220.0, "avg_weight": 3.0},
+        "International": {"count": 260, "min_rev": 180.0, "max_rev": 950.0, "avg_weight": 14.5},
+    }
+
+    packages_by_type = []
+    dot_plot_data = []
+    table_rows = []
+    
+    total_revenue = 0.0
+    total_packages = 0
+
+    # Generate aggregates per type
+    for p_type, prof in type_profiles.items():
+        type_count = prof["count"]
+        # Generate revenue sum
+        type_rev = 0.0
         
-        records.append({
-            "id": f"TX-{idx}",
-            "customer": cust_name,
-            "segment": segment,
-            "region": region,
-            "category": category,
-            "amount": amount,
-            "churn_risk_score": churn_risk,
-            "status": status,
-            "timestamp": tx_date,
-            "contract_months": random.choice([12, 24, 36]),
-            "support_tickets_open": random.choice([0, 1, 2, 4, 7]),
-            "sla_compliance_pct": round(random.uniform(94.5, 99.9), 1)
+        # Sample points for dot plot
+        sample_size = min(40, type_count)
+        for i in range(sample_size):
+            rev = round(random.uniform(prof["min_rev"], prof["max_rev"]), 2)
+            type_rev += rev * (type_count / sample_size)
+            weight = round(max(0.5, random.gauss(prof["avg_weight"], prof["avg_weight"] * 0.3)), 1)
+            pkg_id = f"PKG-{p_type[:3].upper()}-{1000 + len(dot_plot_data)}"
+            dest = random.choice(destinations)
+            status = random.choice(["Delivered", "Delivered", "In Transit", "Out for Delivery", "Delayed"])
+            
+            # Format for ECharts Dot Plot: [x_category_index, revenue, package_id, weight, destination, status]
+            dot_plot_data.append({
+                "package_type": p_type,
+                "revenue": rev,
+                "package_id": pkg_id,
+                "weight_kg": weight,
+                "destination": dest,
+                "status": status,
+                "timestamp": (datetime.now() - timedelta(days=random.randint(0, 30), hours=random.randint(1, 23))).strftime("%Y-%m-%d %H:%M")
+            })
+
+        type_rev = round(type_rev, 2)
+        total_revenue += type_rev
+        total_packages += type_count
+
+        packages_by_type.append({
+            "package_type": p_type,
+            "count": type_count,
+            "total_revenue": type_rev,
+            "avg_revenue": round(type_rev / type_count, 2)
         })
 
-    # Summary KPI stats
-    total_rev = sum(d["revenue"] for d in daily_revenue)
-    total_tx = sum(d["transactions"] for d in daily_revenue)
-    avg_ticket = round(total_rev / total_tx, 2)
-    avg_churn = round(sum(r["churn_risk_score"] for r in records) / len(records), 3)
+    # Prepare table rows
+    table_rows = dot_plot_data.copy()
+    random.shuffle(table_rows)
+
+    avg_rev_per_pkg = round(total_revenue / total_packages, 2)
+
+    # 30-day timeline trend
+    daily_trends = []
+    for day in range(30):
+        d_str = (base_date + timedelta(days=day + 30)).strftime("%Y-%m-%d")
+        daily_rev = round(total_revenue / 30 * random.uniform(0.85, 1.25), 2)
+        daily_pkgs = int(total_packages / 30 * random.uniform(0.85, 1.25))
+        daily_trends.append({
+            "date": d_str,
+            "revenue": daily_rev,
+            "packages_count": daily_pkgs,
+        })
 
     return {
-        "dataset_name": "gcp_production_analytics",
-        "tables": ["daily_kpis", "transactions", "customer_churn_features", "infra_utilization"],
-        "daily_trends": daily_revenue,
-        "table_rows": records,
+        "dataset_name": "uploadeddataset",
+        "tables": ["packages"],
+        "packages_by_type": packages_by_type,
+        "dot_plot_data": dot_plot_data,
+        "table_rows": table_rows,
+        "daily_trends": daily_trends,
         "kpis": {
-            "total_revenue": {"value": f"${total_rev:,.0f}", "raw": total_rev, "change": "+14.8%", "is_positive": True},
-            "total_transactions": {"value": f"{total_tx:,}", "raw": total_tx, "change": "+8.4%", "is_positive": True},
-            "avg_order_value": {"value": f"${avg_ticket:,.2f}", "raw": avg_ticket, "change": "+5.2%", "is_positive": True},
-            "avg_churn_risk": {"value": f"{avg_churn * 100:.1f}%", "raw": avg_churn, "change": "-3.1%", "is_positive": True},
-            "active_gcp_slots": {"value": "2,450", "raw": 2450, "change": "+12.0%", "is_positive": True},
-            "bq_query_latency": {"value": "310 ms", "raw": 310, "change": "-18.5%", "is_positive": True}
-        },
-        "category_breakdown": [
-            {"category": "Cloud Software", "value": 412000, "share": 34.5},
-            {"category": "Compute Nodes", "value": 298000, "share": 25.0},
-            {"category": "AI API Credits", "value": 245000, "share": 20.5},
-            {"category": "Enterprise Storage", "value": 142000, "share": 11.9},
-            {"category": "Networking Bandwidth", "value": 96000, "share": 8.1},
-        ],
-        "region_distribution": [
-            {"region": "us-central1", "revenue": 520000, "active_nodes": 140},
-            {"region": "us-east4", "revenue": 385000, "active_nodes": 95},
-            {"region": "europe-west1", "revenue": 210000, "active_nodes": 60},
-            {"region": "asia-east1", "revenue": 178000, "active_nodes": 45},
-        ]
+            "total_revenue": {"value": f"${total_revenue:,.2f}", "raw": total_revenue, "change": "+16.4%", "is_positive": True},
+            "total_packages": {"value": f"{total_packages:,}", "raw": total_packages, "change": "+9.8%", "is_positive": True},
+            "avg_revenue_per_pkg": {"value": f"${avg_rev_per_pkg:,.2f}", "raw": avg_rev_per_pkg, "change": "+4.2%", "is_positive": True},
+            "top_package_type": {"value": "Standard Ground", "raw": 1420, "change": "35.7% share", "is_positive": True},
+        }
     }
 
 def generate_forecast_sample(horizon_days=30):
     base_date = datetime.now()
     forecast_results = []
-    base_val = 19500.0
+    base_val = 31500.0
     
     for i in range(1, horizon_days + 1):
         future_date = (base_date + timedelta(days=i)).strftime("%Y-%m-%d")
         growth = (1 + (i / 100.0))
-        seasonal = 1.12 if (base_date + timedelta(days=i)).weekday() < 5 else 0.82
-        val = base_val * growth * seasonal + random.uniform(-400, 600)
+        seasonal = 1.10 if (base_date + timedelta(days=i)).weekday() < 5 else 0.80
+        val = base_val * growth * seasonal + random.uniform(-600, 800)
         
-        # Uncertainty intervals widen as horizon increases
-        uncertainty = 1200 * math.sqrt(i / 5.0)
+        uncertainty = 1600 * math.sqrt(i / 5.0)
         lower_bound = max(0, val - uncertainty)
         upper_bound = val + uncertainty
         
@@ -159,42 +137,38 @@ def generate_anomaly_sample():
     anomalies = []
     for day in range(60):
         d = (base_date + timedelta(days=day)).strftime("%Y-%m-%d")
-        metric_val = 500 + random.uniform(-50, 60)
+        metric_val = 135 + random.uniform(-15, 20)
         is_anom = False
         severity = "NORMAL"
-        prob = 0.05
+        prob = 0.04
         
-        if day in (14, 38, 52):
+        if day in (18, 44):
             is_anom = True
-            if day == 14:
-                metric_val = 980
-                severity = "HIGH"
-                prob = 0.96
-            elif day == 38:
-                metric_val = 120
-                severity = "CRITICAL_DROP"
-                prob = 0.99
+            if day == 18:
+                metric_val = 310
+                severity = "HIGH_VOLUME_SPIKE"
+                prob = 0.97
             else:
-                metric_val = 860
-                severity = "MEDIUM"
-                prob = 0.84
+                metric_val = 25
+                severity = "WEATHER_DELIVERY_DROP"
+                prob = 0.92
                 
         anomalies.append({
             "timestamp": d,
             "actual_value": round(metric_val, 2),
-            "expected_value": 500.0,
+            "expected_value": 135.0,
             "is_anomaly": is_anom,
             "anomaly_probability": prob,
             "severity": severity,
-            "metric_name": "bq_slot_consumption_per_min"
+            "metric_name": "daily_packages_processed"
         })
     return anomalies
 
 def generate_key_drivers_sample():
     return [
-        {"feature": "contract_duration_months", "importance_score": 0.38, "direction": "Negative Churn (Retention Anchor)", "relative_impact": 94},
-        {"feature": "open_support_tickets", "importance_score": 0.29, "direction": "Positive Churn Driver (Dissatisfaction)", "relative_impact": 76},
-        {"feature": "monthly_slot_usage_growth", "importance_score": 0.18, "direction": "Negative Churn (High Engagement)", "relative_impact": 52},
-        {"feature": "sla_breach_count", "importance_score": 0.11, "direction": "Positive Churn Driver", "relative_impact": 34},
-        {"feature": "billing_dispute_history", "importance_score": 0.04, "direction": "Positive Churn Driver", "relative_impact": 18}
+        {"feature": "package_weight_kg", "importance_score": 0.42, "direction": "Positive Revenue Driver (Heavier Weight)", "relative_impact": 96},
+        {"feature": "expedited_service_tier", "importance_score": 0.31, "direction": "Positive Revenue Driver (Express/Overnight)", "relative_impact": 82},
+        {"feature": "distance_zone_miles", "importance_score": 0.16, "direction": "Positive Revenue Driver (Cross-Country)", "relative_impact": 48},
+        {"feature": "fuel_surcharge_rate", "importance_score": 0.08, "direction": "Positive Surcharge Factor", "relative_impact": 26},
+        {"feature": "signature_confirmation", "importance_score": 0.03, "direction": "Add-on Revenue Factor", "relative_impact": 12}
     ]

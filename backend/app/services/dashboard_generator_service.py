@@ -16,6 +16,12 @@ class DashboardGeneratorService:
 
     def _seed_default_dashboards(self):
         """Initializes default dashboards."""
+        pkg_dash = self.generate_from_prompt("Package Logistics & Revenue Distribution Analysis")
+        pkg_dash["id"] = "dash-packages-revenue-intelligence"
+        pkg_dash["title"] = "Packages by Type & Revenue Distribution"
+        pkg_dash["is_default"] = True
+        _SAVED_DASHBOARDS[pkg_dash["id"]] = pkg_dash
+
         churn_dash = self.generate_from_prompt("Customer Retention & Churn Risk Intelligence")
         churn_dash["id"] = "dash-churn-risk-intelligence"
         churn_dash["title"] = "Customer Retention & Churn Risk Intelligence"
@@ -65,6 +71,68 @@ class DashboardGeneratorService:
 
         # Dynamic Theme Colors
         colors = ["#3b82f6", "#10b981", "#f59e0b", "#ef4444", "#8b5cf6", "#ec4899", "#06b6d4", "#84cc16"]
+
+        # Case 0: Packages by Type & Revenue Dot Plot
+        if "package" in prompt_lower or "dot" in prompt_lower or "shipping" in prompt_lower:
+            return {
+                "id": dash_id,
+                "title": "Packages by Type & Revenue Dot Plot",
+                "description": f"Analysis of package volume by type, total revenue, and revenue distribution dot plot from `{settings.GCP_PROJECT_ID}.{settings.BQ_DATASET_ID}.packages`.",
+                "created_at": created_at,
+                "prompt": prompt,
+                "kpis": [
+                    {"title": "Total Revenue", "value": "$958,400.00", "change": "+16.4%", "is_positive": True, "icon": "DollarSign"},
+                    {"title": "Total Packages", "value": "3,980", "change": "+9.8%", "is_positive": True, "icon": "Package"},
+                    {"title": "Avg Revenue / Pkg", "value": "$240.80", "change": "+4.2%", "is_positive": True, "icon": "TrendingUp"},
+                    {"title": "Top Package Type", "value": "Standard Ground", "change": "35.7% volume", "is_positive": True, "icon": "BarChart3"},
+                ],
+                "charts": [
+                    {
+                        "id": f"chart-{uuid.uuid4().hex[:6]}",
+                        "title": "Number of Packages by Type",
+                        "type": "bar",
+                        "description": "Total volume of packages categorized by shipping tier.",
+                        "sql": f"SELECT package_type, COUNT(*) as count FROM `{settings.BQ_DATASET_ID}.packages` GROUP BY package_type ORDER BY count DESC;",
+                        "option": {
+                            "tooltip": {"trigger": "axis", "axisPointer": {"type": "shadow"}},
+                            "xAxis": {"type": "category", "data": ["Standard Ground", "Express Air", "Overnight Priority", "Same-Day Courier", "Freight Heavy", "International"], "axisLabel": {"rotate": 15}},
+                            "yAxis": {"type": "value", "name": "Count"},
+                            "series": [{
+                                "data": [1420, 890, 620, 480, 310, 260],
+                                "type": "bar",
+                                "itemStyle": {"color": "#3b82f6", "borderRadius": [6, 6, 0, 0]},
+                                "barWidth": "45%",
+                                "label": {"show": True, "position": "top"}
+                            }]
+                        }
+                    },
+                    {
+                        "id": f"chart-{uuid.uuid4().hex[:6]}",
+                        "title": "Package Revenue Dot Plot Distribution",
+                        "type": "scatter",
+                        "description": "Dot plot showing individual package revenue amounts across package categories.",
+                        "sql": f"SELECT package_id, package_type, revenue, destination FROM `{settings.BQ_DATASET_ID}.packages` LIMIT 100;",
+                        "option": {
+                            "tooltip": {"trigger": "item", "formatter": "{b}: ${c}"},
+                            "xAxis": {"type": "category", "data": ["Standard Ground", "Express Air", "Overnight Priority", "Same-Day Courier", "Freight Heavy", "International"], "axisLabel": {"rotate": 15}},
+                            "yAxis": {"type": "value", "name": "Revenue ($)", "axisLabel": {"formatter": "${value}"}},
+                            "series": [{
+                                "symbolSize": 14,
+                                "data": [
+                                    ["Standard Ground", 45], ["Standard Ground", 85], ["Standard Ground", 120], ["Standard Ground", 160],
+                                    ["Express Air", 120], ["Express Air", 185], ["Express Air", 240], ["Express Air", 310],
+                                    ["Overnight Priority", 220], ["Overnight Priority", 340], ["Overnight Priority", 450], ["Overnight Priority", 560],
+                                    ["Same-Day Courier", 60], ["Same-Day Courier", 95], ["Same-Day Courier", 140], ["Same-Day Courier", 210],
+                                    ["Freight Heavy", 650], ["Freight Heavy", 1100], ["Freight Heavy", 1650], ["Freight Heavy", 2200],
+                                    ["International", 280], ["International", 450], ["International", 680], ["International", 920]
+                                ],
+                                "type": "scatter",
+                                "itemStyle": {"color": "#10b981"}
+                            }]
+                        }
+                    }
+                ]
+            }
 
         # Case 1: Churn / Customer Intelligence
         if "churn" in prompt_lower or "retention" in prompt_lower or "customer" in prompt_lower:

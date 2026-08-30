@@ -5,20 +5,20 @@ import { useApp } from '../../context/AppContext';
 
 const PRESET_QUERIES = [
   {
-    name: 'Top 10 ARR Accounts',
-    sql: 'SELECT id, customer, segment, region, amount, churn_risk_score, status FROM `analytics_production.transactions` ORDER BY amount DESC LIMIT 10;'
+    name: 'Packages by Type & Total Revenue',
+    sql: 'SELECT package_type, COUNT(*) as count, ROUND(SUM(revenue), 2) as total_revenue, ROUND(AVG(revenue), 2) as avg_revenue FROM `tribal-datum-507019-m0.uploadeddataset.packages` GROUP BY package_type ORDER BY total_revenue DESC;'
   },
   {
-    name: 'Daily Revenue & Anomaly Scan',
-    sql: 'SELECT date, revenue, transactions, active_users, is_anomaly, anomaly_score FROM `analytics_production.daily_kpis` ORDER BY date DESC LIMIT 30;'
+    name: 'Top 20 Highest Revenue Packages',
+    sql: 'SELECT package_id, package_type, revenue, weight_kg, destination, status, timestamp FROM `tribal-datum-507019-m0.uploadeddataset.packages` ORDER BY revenue DESC LIMIT 20;'
   },
   {
-    name: 'Churn Risk by Customer Tier',
-    sql: 'SELECT segment, COUNT(id) as total_accounts, AVG(churn_risk_score) * 100 as avg_churn_pct, SUM(amount) as total_arr FROM `analytics_production.transactions` GROUP BY segment;'
+    name: 'Revenue Distribution by Destination',
+    sql: 'SELECT destination, COUNT(*) as packages_count, ROUND(SUM(revenue), 2) as total_revenue FROM `tribal-datum-507019-m0.uploadeddataset.packages` GROUP BY destination ORDER BY total_revenue DESC;'
   },
   {
-    name: 'BigQuery Slot Consumption (Per Min)',
-    sql: 'SELECT timestamp, bq_slot_consumption_per_min, latency_ms, error_rate_pct FROM `analytics_production.infra_utilization` ORDER BY timestamp DESC LIMIT 20;'
+    name: 'Overall Total Revenue & Package Count',
+    sql: 'SELECT COUNT(*) as total_packages, ROUND(SUM(revenue), 2) as total_revenue, ROUND(AVG(revenue), 2) as avg_revenue_per_package FROM `tribal-datum-507019-m0.uploadeddataset.packages`;'
   }
 ];
 
