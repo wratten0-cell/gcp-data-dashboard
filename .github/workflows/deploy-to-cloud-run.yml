@@ -16,23 +16,20 @@ jobs:
   deploy:
     permissions:
       contents: 'read'
-      id-token: 'write' # Required for Workload Identity Federation (Keyless)
+      id-token: 'write'
 
     runs-on: ubuntu-latest
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
 
-      # Modern Keyless Authentication with Google Workload Identity Federation (WIF)
-      # Or fallback to Service Account JSON key if configured
+      # Keyless Authentication with Google Workload Identity Federation (WIF)
       - name: Google Cloud Auth
         id: auth
         uses: google-github-actions/auth@v2
         with:
-          # If using Keyless Workload Identity (Recommended):
           workload_identity_provider: ${{ secrets.WIF_PROVIDER }}
           service_account: ${{ secrets.WIF_SERVICE_ACCOUNT }}
-          # If using Service Account JSON key (Legacy fallback):
           credentials_json: ${{ secrets.GCP_SA_KEY }}
 
       - name: Set up Cloud SDK
@@ -48,15 +45,18 @@ jobs:
 
       - name: Deploy to Cloud Run
         id: deploy
-        uses: google-github-actions/deploy-cloudrun@v2
-        with:
-          service: ${{ env.SERVICE }}
-          region: ${{ env.REGION }}
-          image: ${{ env.GAR_LOCATION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.REPOSITORY }}/${{ env.SERVICE }}:${{ github.sha }}
-          flags: '--allow-unauthenticated'
-          env_vars: |-
-            GCP_PROJECT_ID=${{ env.PROJECT_ID }}
-            ENVIRONMENT=production
+        run: |-
+          gcloud run deploy ${{ env.SERVICE }} \
+            --image="${{ env.GAR_LOCATION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.REPOSITORY }}/${{ env.SERVICE }}:${{ github.sha }}" \
+            --region="${{ env.REGION }}" \
+            --platform=managed \
+            --allow-unauthenticated \
+            --service-account="gcp-dashboard-sa@${{ env.PROJECT_ID }}.iam.gserviceaccount.com" \
+            --set-env-vars="GCP_PROJECT_ID=${{ env.PROJECT_ID }},ENVIRONMENT=production,DEMO_MODE=false"
 
       - name: Show Cloud Run Output URL
-        run: echo "🚀 Successfully deployed to ${{ steps.deploy.outputs.url }}"
+        run: |-
+          URL=$(gcloud run services describe ${{ env.SERVICE }} --region=${{ env.REGION }} --project=${{ env.PROJECT_ID }} --format='value(status.url)')
+          echo "=========================================================="
+          echo "🚀 LIVE APP URL: $URL"
+          echo "=========================================================="
