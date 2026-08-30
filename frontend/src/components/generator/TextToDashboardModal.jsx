@@ -4,10 +4,10 @@ import { useApp } from '../../context/AppContext';
 import { generateDashboardFromText } from '../../services/api';
 
 const EXAMPLE_PROMPTS = [
-  'Create an executive churn risk dashboard with Q4 revenue forecast and regional breakdowns',
-  'Build a FinOps cloud cost analysis comparing slot consumption and latency across regions',
-  'Generate an e-commerce sales conversion dashboard with customer tier scatter plots',
-  'Create a real-time SLA incident response and support ticket queue monitor',
+  'Analyze Ground Advantage vs other package types with volume and revenue comparison',
+  'Show the revenue dot plot distribution and highest earning shipments',
+  'Create a breakdown of total packages and shipping revenue by service tier',
+  'Compare average revenue per package across categories',
 ];
 
 export function TextToDashboardModal() {
