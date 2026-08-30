@@ -5,27 +5,19 @@ from datetime import datetime, timedelta
 def generate_ecommerce_data():
     base_date = datetime.now() - timedelta(days=60)
     package_types = [
-        "Standard Ground",
-        "Express Air",
-        "Overnight Priority",
-        "Freight Heavy",
-        "Same-Day Courier",
-        "International"
+        "Package Type 1",
+        "Package Type 2"
     ]
     
     destinations = [
         "New York, NY", "Los Angeles, CA", "Chicago, IL", "Houston, TX", 
-        "Seattle, WA", "Atlanta, GA", "London, UK", "Frankfurt, DE", "Tokyo, JP"
+        "Seattle, WA", "Atlanta, GA"
     ]
 
-    # Package counts & base revenue parameters per type
+    # Exactly 2 package types
     type_profiles = {
-        "Standard Ground": {"count": 1420, "min_rev": 15.0, "max_rev": 180.0, "avg_weight": 4.5},
-        "Express Air": {"count": 890, "min_rev": 65.0, "max_rev": 350.0, "avg_weight": 6.2},
-        "Overnight Priority": {"count": 620, "min_rev": 120.0, "max_rev": 580.0, "avg_weight": 8.0},
-        "Freight Heavy": {"count": 310, "min_rev": 450.0, "max_rev": 2400.0, "avg_weight": 85.0},
-        "Same-Day Courier": {"count": 480, "min_rev": 40.0, "max_rev": 220.0, "avg_weight": 3.0},
-        "International": {"count": 260, "min_rev": 180.0, "max_rev": 950.0, "avg_weight": 14.5},
+        "Package Type 1": {"count": 1420, "min_rev": 25.0, "max_rev": 380.0, "avg_weight": 5.5},
+        "Package Type 2": {"count": 980, "min_rev": 65.0, "max_rev": 750.0, "avg_weight": 12.0},
     }
 
     packages_by_type = []

@@ -5,7 +5,7 @@ from typing import Optional
 class Settings(BaseSettings):
     ENVIRONMENT: str = os.getenv("ENVIRONMENT", "development")
     PORT: int = int(os.getenv("PORT", "8000"))
-    DEMO_MODE: bool = os.getenv("DEMO_MODE", "true").lower() in ("true", "1", "yes")
+    DEMO_MODE: bool = os.getenv("DEMO_MODE", "false").lower() in ("true", "1", "yes")
     
     # GCP Config
     GCP_PROJECT_ID: str = os.getenv("GCP_PROJECT_ID", "tribal-datum-507019-m0")

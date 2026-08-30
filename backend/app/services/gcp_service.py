@@ -39,14 +39,14 @@ class GCPService:
             "dataset_id": settings.BQ_DATASET_ID,
             "has_gemini_key": bool(settings.GEMINI_API_KEY),
             "authenticated": is_live,
-            "available_tables": self._demo_data["tables"] if not is_live else self.list_tables()
+            "available_tables": ["packages"] if not is_live else self.list_tables()
         }
 
     def list_tables(self) -> List[str]:
         """Lists available tables in the configured BigQuery dataset."""
         client = self.get_bq_client()
         if client is None:
-            return self._demo_data["tables"]
+            return ["packages"]
         
         try:
             dataset_ref = client.dataset(settings.BQ_DATASET_ID)
@@ -54,7 +54,7 @@ class GCPService:
             return [t.table_id for t in tables]
         except Exception as e:
             logger.error(f"Error listing BigQuery tables: {e}")
-            return self._demo_data["tables"]
+            return ["packages"]
 
     def execute_query(self, sql_query: str, limit: int = 100) -> Dict[str, Any]:
         """Executes a SQL query against BigQuery or simulates against demo data."""
@@ -94,10 +94,8 @@ class GCPService:
 
         # Fallback Demo Data Query Simulation
         sql_lower = sql_query.lower()
-        if "packages_by_type" in sql_lower or "group by package_type" in sql_lower:
+        if "package_type" in sql_lower or "group by" in sql_lower:
             rows = self._demo_data["packages_by_type"]
-        elif "daily" in sql_lower or "revenue" in sql_lower or "trend" in sql_lower:
-            rows = self._demo_data["daily_trends"]
         else:
             rows = self._demo_data["table_rows"]
 
@@ -113,56 +111,118 @@ class GCPService:
         }
 
     def get_dashboard_summary(self) -> Dict[str, Any]:
-        """Returns KPI, chart aggregates, and dot plot data for packages table."""
+        """
+        Dynamically inspects and queries tribal-datum-507019-m0.uploadeddataset.packages.
+        Automatically detects column names and extracts ONLY the exact package types present.
+        """
         client = self.get_bq_client()
         
-        if client is not None and not settings.DEMO_MODE:
+        if client is not None:
             try:
-                # Query aggregates by package type
-                sql_types = f"""
-                SELECT 
-                    COALESCE(package_type, 'Standard') AS package_type,
-                    COUNT(*) AS count,
-                    ROUND(SUM(CAST(revenue AS FLOAT64)), 2) AS total_revenue,
-                    ROUND(AVG(CAST(revenue AS FLOAT64)), 2) AS avg_revenue
-                FROM `{settings.GCP_PROJECT_ID}.{settings.BQ_DATASET_ID}.packages`
-                GROUP BY package_type
-                ORDER BY count DESC;
-                """
-                job_types = client.query(sql_types)
-                packages_by_type = [dict(r.items()) for r in job_types.result()]
+                table_id = f"`{settings.GCP_PROJECT_ID}.{settings.BQ_DATASET_ID}.packages`"
+                logger.info(f"Querying live BigQuery table: {table_id}")
                 
-                # Query sample rows for dot plot and table
-                sql_rows = f"""
-                SELECT * 
-                FROM `{settings.GCP_PROJECT_ID}.{settings.BQ_DATASET_ID}.packages`
-                LIMIT 200;
-                """
-                job_rows = client.query(sql_rows)
-                rows = [dict(r.items()) for r in job_rows.result()]
+                # Fetch records to inspect columns and rows
+                query_sql = f"SELECT * FROM {table_id} LIMIT 1000"
+                query_job = client.query(query_sql)
+                raw_rows = [dict(r.items()) for r in query_job.result()]
+                
+                if raw_rows:
+                    first_row = raw_rows[0]
+                    cols = list(first_row.keys())
+                    
+                    # 1. Identify package_type column
+                    type_col = None
+                    for c in cols:
+                        c_lower = c.lower()
+                        if 'type' in c_lower or 'category' in c_lower:
+                            type_col = c
+                            break
+                    if not type_col:
+                        # Fallback to first text column
+                        for c in cols:
+                            if isinstance(first_row[c], str) and 'id' not in c.lower():
+                                type_col = c
+                                break
+                    if not type_col:
+                        type_col = cols[0]
 
-                # Calculate KPI sums
-                total_pkgs = sum(t["count"] for t in packages_by_type) if packages_by_type else len(rows)
-                total_rev = sum(t["total_revenue"] for t in packages_by_type) if packages_by_type else sum(float(r.get("revenue", 0)) for r in rows)
-                avg_rev = round(total_rev / total_pkgs, 2) if total_pkgs > 0 else 0
+                    # 2. Identify revenue column
+                    rev_col = None
+                    for c in cols:
+                        c_lower = c.lower()
+                        if any(k in c_lower for k in ['rev', 'amount', 'price', 'cost', 'val', 'total']):
+                            rev_col = c
+                            break
+                    if not rev_col:
+                        # Fallback to first numeric column
+                        for c in cols:
+                            if isinstance(first_row[c], (int, float)):
+                                rev_col = c
+                                break
+                    if not rev_col:
+                        rev_col = cols[1] if len(cols) > 1 else cols[0]
 
-                top_type = packages_by_type[0]["package_type"] if packages_by_type else "Standard"
+                    logger.info(f"Detected columns -> Package Type: '{type_col}', Revenue: '{rev_col}'")
 
-                return {
-                    "dataset_name": settings.BQ_DATASET_ID,
-                    "tables": ["packages"],
-                    "packages_by_type": packages_by_type,
-                    "dot_plot_data": rows,
-                    "table_rows": rows,
-                    "kpis": {
-                        "total_revenue": {"value": f"${total_rev:,.2f}", "raw": total_rev, "change": "+16.4%", "is_positive": True},
-                        "total_packages": {"value": f"{total_pkgs:,}", "raw": total_pkgs, "change": "+9.8%", "is_positive": True},
-                        "avg_revenue_per_pkg": {"value": f"${avg_rev:,.2f}", "raw": avg_rev, "change": "+4.2%", "is_positive": True},
-                        "top_package_type": {"value": top_type, "raw": top_type, "change": "Leading volume", "is_positive": True},
+                    # Normalize rows and calculate metrics strictly for the actual types present
+                    type_groups = {}
+                    normalized_rows = []
+
+                    for r in raw_rows:
+                        raw_type = str(r.get(type_col) or 'Unknown').strip()
+                        raw_rev = 0.0
+                        try:
+                            raw_rev = float(r.get(rev_col) or 0.0)
+                        except (ValueError, TypeError):
+                            raw_rev = 0.0
+
+                        if raw_type not in type_groups:
+                            type_groups[raw_type] = {"count": 0, "total_revenue": 0.0}
+
+                        type_groups[raw_type]["count"] += 1
+                        type_groups[raw_type]["total_revenue"] += raw_rev
+
+                        normalized_row = {
+                            **r,
+                            "package_type": raw_type,
+                            "revenue": raw_rev,
+                            "id": str(r.get("package_id") or r.get("id") or f"PKG-{len(normalized_rows) + 1}")
+                        }
+                        normalized_rows.append(normalized_row)
+
+                    # Build packages_by_type strictly from discovered types
+                    packages_by_type = [
+                        {
+                            "package_type": p_type,
+                            "count": stats["count"],
+                            "total_revenue": round(stats["total_revenue"], 2),
+                            "avg_revenue": round(stats["total_revenue"] / stats["count"], 2) if stats["count"] > 0 else 0
+                        }
+                        for p_type, stats in sorted(type_groups.items(), key=lambda x: x[1]["count"], reverse=True)
+                    ]
+
+                    total_pkgs = sum(p["count"] for p in packages_by_type)
+                    total_rev = sum(p["total_revenue"] for p in packages_by_type)
+                    avg_rev = round(total_rev / total_pkgs, 2) if total_pkgs > 0 else 0
+                    top_type = packages_by_type[0]["package_type"] if packages_by_type else "None"
+
+                    return {
+                        "dataset_name": settings.BQ_DATASET_ID,
+                        "tables": ["packages"],
+                        "packages_by_type": packages_by_type,
+                        "dot_plot_data": normalized_rows,
+                        "table_rows": normalized_rows,
+                        "kpis": {
+                            "total_revenue": {"value": f"${total_rev:,.2f}", "raw": total_rev, "change": "Live BigQuery", "is_positive": True},
+                            "total_packages": {"value": f"{total_pkgs:,}", "raw": total_pkgs, "change": f"{len(packages_by_type)} Types", "is_positive": True},
+                            "avg_revenue_per_pkg": {"value": f"${avg_rev:,.2f}", "raw": avg_rev, "change": "Average / Pkg", "is_positive": True},
+                            "top_package_type": {"value": top_type, "raw": top_type, "change": "Leading Category", "is_positive": True},
+                        }
                     }
-                }
+
             except Exception as e:
-                logger.warning(f"Error querying live BigQuery packages table: {e}. Falling back to demo generator.")
+                logger.error(f"Error querying live BigQuery packages table: {e}", exc_info=True)
 
         return self._demo_data
 
