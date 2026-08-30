@@ -64,7 +64,7 @@ export function Sidebar() {
             }`}
           >
             <LayoutDashboard className="w-4 h-4" />
-            <span>Executive Overview</span>
+            <span>Control Tower Overview</span>
           </button>
 
           <button
