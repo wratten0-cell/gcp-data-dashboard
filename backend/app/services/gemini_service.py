@@ -7,7 +7,6 @@ from typing import AsyncGenerator, Dict, Any, List
 import httpx
 from google.api_core.client_options import ClientOptions
 from app.config import settings
-from app.services.gcp_service import gcp_service
 
 logger = logging.getLogger("gemini_service")
 
@@ -22,13 +21,12 @@ try:
 except ImportError:
     gemini_analytics = None
     HAS_SDK = False
-    logger.warning("google.cloud.geminidataanalytics_v1beta SDK not found. Will use REST API / GenAI fallback.")
+    logger.warning("google.cloud.geminidataanalytics_v1beta SDK not found.")
 
 
 class GeminiService:
     def __init__(self):
         self._analytics_client = None
-        self._genai_client = None
 
     def get_analytics_client(self):
         """
@@ -46,31 +44,6 @@ class GeminiService:
             return self._analytics_client
         except Exception as e:
             logger.warning(f"Could not initialize DataChatServiceClient with endpoint {US_ENDPOINT}: {e}")
-            return None
-
-    def get_genai_client(self):
-        """Fallback Google GenAI client."""
-        if self._genai_client is not None:
-            return self._genai_client
-        
-        if settings.GEMINI_API_KEY:
-            try:
-                from google import genai
-                self._genai_client = genai.Client(api_key=settings.GEMINI_API_KEY)
-                return self._genai_client
-            except Exception as e:
-                logger.warning(f"Could not initialize GenAI with key: {e}")
-
-        try:
-            from google import genai
-            self._genai_client = genai.Client(
-                vertexai=True,
-                project=settings.GCP_PROJECT_ID,
-                location=settings.GCP_REGION
-            )
-            return self._genai_client
-        except Exception as e:
-            logger.warning(f"Could not initialize Vertex AI client: {e}")
             return None
 
     async def _stream_via_sdk(
@@ -187,7 +160,7 @@ class GeminiService:
             async with http_client.stream("POST", url, headers=headers, json=payload) as response:
                 if response.status_code != 200:
                     error_text = await response.aread()
-                    raise RuntimeError(f"REST API ({US_ENDPOINT}) status {response.status_code}: {error_text.decode('utf-8')}")
+                    raise RuntimeError(f"REST API ({US_ENDPOINT}) returned HTTP {response.status_code}: {error_text.decode('utf-8')}")
 
                 async for line in response.aiter_lines():
                     if line.startswith("data:"):
@@ -214,123 +187,67 @@ class GeminiService:
 
     async def stream_chat(self, message: str, history: List[Dict[str, str]] = None) -> AsyncGenerator[str, None]:
         """
-        Primary chat entry point connecting directly to the user's BigQuery Data Agent.
+        STRICT Conversational Analytics execution:
+        Connects exclusively to your BigQuery Data Agent.
+        If connection fails, it aborts with an explicit error diagnostics message (NO fallbacks).
         """
         history = history or []
         agent_path = settings.DATA_AGENT_PATH
         agent_id = settings.DATA_AGENT_ID
-        table_name = f"`{settings.GCP_PROJECT_ID}.{settings.BQ_DATASET_ID}.packages`"
+        errors = []
 
-        yield f"data: {json.dumps({'type': 'THOUGHT', 'content': f'Connecting to BigQuery Data Agent: {agent_id} at {US_ENDPOINT}...'})}\n\n"
-        await asyncio.sleep(0.1)
+        yield f"data: {json.dumps({'type': 'THOUGHT', 'content': f'Connecting exclusively to BigQuery Data Agent: {agent_id} at {US_ENDPOINT}...'})}\n\n"
+        await asyncio.sleep(0.08)
 
         # ---------------------------------------------------------------------
-        # 1. Official Conversational Analytics API (SDK) with Multi-Region Endpoint
+        # 1. Official Conversational Analytics API (SDK)
         # ---------------------------------------------------------------------
         analytics_client = self.get_analytics_client()
         if analytics_client is not None:
             try:
-                logger.info(f"Invoking Data Agent {agent_path} via gRPC SDK at {US_ENDPOINT}...")
-                yield f"data: {json.dumps({'type': 'THOUGHT', 'content': f'Query dispatched to BigQuery Data Agent ({agent_id}). Awaiting response stream...'})}\n\n"
+                logger.info(f"Connecting to Data Agent {agent_path} via gRPC SDK at {US_ENDPOINT}...")
+                yield f"data: {json.dumps({'type': 'THOUGHT', 'content': f'Query dispatched to BigQuery Data Agent ({agent_id}) via gRPC SDK...'})}\n\n"
                 async for chunk in self._stream_via_sdk(analytics_client, message, history, agent_path):
                     yield chunk
                 return
             except Exception as e:
-                logger.warning(f"DataChatServiceClient failed with: {e}. Trying REST endpoint.")
+                logger.error(f"Conversational Analytics SDK error: {e}")
+                errors.append(f"gRPC SDK Error: {str(e)}")
 
         # ---------------------------------------------------------------------
         # 2. Official Conversational Analytics API (Direct HTTPS REST Stream)
         # ---------------------------------------------------------------------
         try:
-            logger.info(f"Invoking Data Agent {agent_path} via REST stream at {US_ENDPOINT}...")
-            yield f"data: {json.dumps({'type': 'THOUGHT', 'content': f'Connecting via HTTPS to {US_ENDPOINT} for Data Agent ({agent_id})...'})}\n\n"
+            logger.info(f"Connecting to Data Agent {agent_path} via REST stream at {US_ENDPOINT}...")
+            yield f"data: {json.dumps({'type': 'THOUGHT', 'content': f'Connecting via HTTPS REST stream to {US_ENDPOINT} for Data Agent ({agent_id})...'})}\n\n"
             async for chunk in self._stream_via_rest(message, history, agent_path):
                 yield chunk
             return
         except Exception as e:
-            logger.warning(f"Conversational Analytics REST endpoint error: {e}. Falling back to direct BigQuery execution loop.")
-            yield f"data: {json.dumps({'type': 'THOUGHT', 'content': f'Data Agent API notice: {e}. Executing direct BigQuery analysis...'})}\n\n"
+            logger.error(f"Conversational Analytics REST error: {e}")
+            errors.append(f"HTTPS REST Error: {str(e)}")
 
         # ---------------------------------------------------------------------
-        # 3. Dynamic BigQuery Reasoning Loop Fallback
+        # 3. STRICT FAILURE (No Fallbacks)
         # ---------------------------------------------------------------------
-        sql = ""
-        genai_client = self.get_genai_client()
-
-        if genai_client:
-            prompt = f"""You are a BigQuery SQL analyst for table `{settings.GCP_PROJECT_ID}.{settings.BQ_DATASET_ID}.packages`.
-Columns:
-- `Type` (STRING): 'Ground Advantage', 'Priority Mail'
-- `Revenue` (FLOAT64): Dollar postage price
-
-USER QUESTION: "{message}"
-Generate the exact BigQuery SQL query:
-"""
-            for m in [settings.GEMINI_MODEL, "gemini-2.0-flash", "gemini-1.5-flash"]:
-                try:
-                    resp = genai_client.models.generate_content(model=m, contents=[prompt])
-                    s = resp.text.strip()
-                    if s.startswith("```"):
-                        s = re.sub(r"^```[a-zA-Z]*\n", "", s)
-                        s = re.sub(r"\n```$", "", s).strip()
-                    if "select" in s.lower() and "from" in s.lower():
-                        sql = s
-                        break
-                except Exception:
-                    continue
-
-        if not sql:
-            msg_low = message.lower()
-            price_match = re.search(r'(?:under|less than|below|<|over|more than|greater than|>)\s*\$?(\d+(?:\.\d+)?)', msg_low)
-            is_under = any(w in msg_low for w in ["under", "less", "below", "<"])
-            op = "<" if is_under else ">"
-            
-            if price_match:
-                val = float(price_match.group(1))
-                sql = f"""SELECT `Type`, COUNT(*) AS count, ROUND(AVG(`Revenue`), 2) AS avg_price
-FROM {table_name}
-WHERE `Revenue` {op} {val}
-GROUP BY `Type`
-ORDER BY `Type`;"""
-            elif "standard dev" in msg_low or "variance" in msg_low:
-                sql = f"SELECT `Type`, ROUND(STDDEV(`Revenue`), 2) AS std_dev, ROUND(AVG(`Revenue`), 2) AS avg_price FROM {table_name} GROUP BY `Type`;"
-            else:
-                sql = f"SELECT `Type`, COUNT(*) AS count, ROUND(AVG(`Revenue`), 2) AS avg_price FROM {table_name} GROUP BY `Type`;"
-
-        yield f"data: {json.dumps({'type': 'THOUGHT', 'content': f'Running SQL: {sql}'})}\n\n"
-        await asyncio.sleep(0.1)
-
-        query_res = gcp_service.execute_query(sql)
-        rows = query_res.get("rows", [])
-
-        yield f"data: {json.dumps({'type': 'THOUGHT', 'content': f'Database returned {len(rows)} verified records. Formulating answer...'})}\n\n"
-        await asyncio.sleep(0.08)
-
-        table_lines = []
-        bullets = []
-        if rows:
-            cols = list(rows[0].keys())
-            header = "| " + " | ".join(c.replace('_', ' ').title() for c in cols) + " |"
-            sep = "| " + " | ".join([":---"] * len(cols)) + " |"
-            table_lines.extend([header, sep])
-            for r in rows:
-                row_str = "| " + " | ".join(str(r.get(c)) for c in cols) + " |"
-                table_lines.append(row_str)
-                type_val = r.get("Type") or "Package"
-                val = r.get(cols[1]) if len(cols) > 1 else ""
-                bullets.append(f"- **{type_val}**: {val}")
-
-        response_text = (
-            f"### Analysis Results\n\n"
-            f"Queried from `{table_name}`:\n\n" +
-            "\n".join(bullets) + "\n\n" +
-            "\n".join(table_lines)
+        error_details = "\n".join(f"- {err}" for err in errors) if errors else "No active Conversational Analytics client could be initialized."
+        
+        failure_message = (
+            f"❌ **Conversational Analytics Connection Failure**\n\n"
+            f"The chat assistant failed to connect to your BigQuery Data Agent:\n"
+            f"- **Agent ID**: `{agent_id}`\n"
+            f"- **Agent Path**: `{agent_path}`\n"
+            f"- **Target Endpoint**: `{US_ENDPOINT}`\n\n"
+            f"### Error Diagnostics:\n"
+            f"```text\n{error_details}\n```\n\n"
+            f"> **Required Actions**:\n"
+            f"> 1. Ensure `geminidataanalytics.googleapis.com` is enabled in project `{settings.GCP_PROJECT_ID}`.\n"
+            f"> 2. Verify that Cloud Run service account `gcp-dashboard-sa@{settings.GCP_PROJECT_ID}.iam.gserviceaccount.com` has the `roles/geminidataanalytics.user` role.\n"
+            f"> 3. Verify that the agent is active in BigQuery Agents Hub."
         )
 
-        yield f"data: {json.dumps({'type': 'FINAL_RESPONSE', 'content': response_text})}\n\n"
-        await asyncio.sleep(0.05)
-        yield f"data: {json.dumps({'type': 'SQL_QUERY', 'sql': sql})}\n\n"
-        await asyncio.sleep(0.04)
+        yield f"data: {json.dumps({'type': 'THOUGHT', 'content': 'Conversational Analytics connection failed. Failing explicitly without fallbacks.'})}\n\n"
+        yield f"data: {json.dumps({'type': 'FINAL_RESPONSE', 'content': failure_message})}\n\n"
         yield f"data: {json.dumps({'type': 'DONE'})}\n\n"
 
 gemini_service = GeminiService()
