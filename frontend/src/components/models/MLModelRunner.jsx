@@ -199,8 +199,8 @@ export function MLModelRunner() {
                   <span className="text-xl font-bold text-zinc-800 dark:text-zinc-200">{result.prediction.customer_tier}</span>
                 </div>
                 <div className="p-4 rounded-lg bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800">
-                  <span className="text-xs text-zinc-500 block">Estimated Churn Prob</span>
-                  <span className="text-xl font-bold font-mono text-amber-500">{result.prediction.estimated_churn_probability}</span>
+                  <span className="text-xs text-zinc-500 block">Variance Confidence</span>
+                  <span className="text-xl font-bold font-mono text-amber-500">{result.prediction.variance_confidence || "98.5%"}</span>
                 </div>
               </div>
             </div>

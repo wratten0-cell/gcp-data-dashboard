@@ -185,7 +185,6 @@ export function OverviewDashboard() {
     segment: r.package_type,
     region: r.destination || r.region || 'US',
     amount: parseFloat(r.revenue || r.amount || 0),
-    churn_risk_score: 0.25,
     status: r.status || 'Active',
     weight_kg: r.weight_kg || 5.0,
     timestamp: r.timestamp || '2026-08-29'

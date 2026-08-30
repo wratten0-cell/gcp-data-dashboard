@@ -38,8 +38,8 @@ export function KPIGrid({ kpis }) {
         change: data.change,
         is_positive: data.is_positive,
         icon: key.includes('revenue') ? 'DollarSign' 
-            : key.includes('transaction') ? 'ShoppingCart' 
-            : key.includes('churn') ? 'Users' 
+            : key.includes('package') ? 'ShoppingCart' 
+            : key.includes('count') ? 'Activity' 
             : key.includes('slot') ? 'Cpu' 
             : key.includes('latency') ? 'Zap' : 'Activity'
       }));

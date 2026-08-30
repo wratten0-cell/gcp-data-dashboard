@@ -1,14 +1,14 @@
 import logging
 from typing import Dict, Any, List, Optional
 from app.config import settings
-from app.data.sample_datasets import generate_ecommerce_data
+from app.data.sample_datasets import generate_package_data
 
 logger = logging.getLogger("gcp_service")
 
 class GCPService:
     def __init__(self):
         self._bq_client = None
-        self._demo_data = generate_ecommerce_data()
+        self._demo_data = generate_package_data()
         self._schema_cache = None
 
     def get_bq_client(self):

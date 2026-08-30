@@ -13,7 +13,7 @@ export function DataTable({
   rows = [], 
   selectedRow = null, 
   onSelectRow,
-  title = "Enterprise Accounts & Transactions"
+  title = "USPS Package Shipments"
 }) {
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedSegment, setSelectedSegment] = useState('ALL');
@@ -104,29 +104,23 @@ export function DataTable({
         <table className="w-full text-left text-xs">
           <thead className="sticky top-0 bg-zinc-50 dark:bg-zinc-900/90 text-zinc-500 dark:text-zinc-400 font-semibold border-b border-zinc-200 dark:border-zinc-800 z-10">
             <tr>
-              <th className="py-2.5 px-4 font-mono">ID</th>
-              <th className="py-2.5 px-4">Customer</th>
-              <th className="py-2.5 px-4">Segment</th>
-              <th className="py-2.5 px-4">Region</th>
-              <th className="py-2.5 px-4">Contract ARR</th>
-              <th className="py-2.5 px-4">Churn Risk Bar</th>
+              <th className="py-2.5 px-4 font-mono">Package ID</th>
+              <th className="py-2.5 px-4">Package Type</th>
+              <th className="py-2.5 px-4">Revenue ($)</th>
+              <th className="py-2.5 px-4">Destination</th>
               <th className="py-2.5 px-4">Status</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-zinc-100 dark:divide-zinc-800/60 text-zinc-700 dark:text-zinc-300">
             {paginatedRows.length === 0 ? (
               <tr>
-                <td colSpan={7} className="py-8 text-center text-zinc-400">
+                <td colSpan={5} className="py-8 text-center text-zinc-400">
                   No records match the current filter.
                 </td>
               </tr>
             ) : (
               paginatedRows.map((row) => {
                 const isSelected = selectedRow?.id === row.id;
-                const riskPct = (row.churn_risk_score || 0) * 100;
-                
-                // Color bar based on score
-                const barColor = riskPct > 50 ? 'bg-rose-500' : riskPct > 25 ? 'bg-orange-400' : 'bg-emerald-500';
 
                 return (
                   <tr
@@ -138,38 +132,27 @@ export function DataTable({
                         : 'hover:bg-zinc-50 dark:hover:bg-zinc-850/60'
                     }`}
                   >
-                    <td className="py-3 px-4 font-mono text-[11px] text-zinc-400 dark:text-zinc-500">
+                    <td className="py-3 px-4 font-mono text-[11px] text-zinc-500 dark:text-zinc-400">
                       {row.id}
                     </td>
                     <td className="py-3 px-4 font-medium text-zinc-900 dark:text-zinc-100">
-                      {row.customer}
-                    </td>
-                    <td className="py-3 px-4">
-                      <span className="px-2 py-0.5 rounded-full bg-zinc-100 dark:bg-zinc-800 text-[10px] text-zinc-600 dark:text-zinc-300">
-                        {row.segment}
+                      <span className="px-2 py-0.5 rounded-full bg-blue-50 dark:bg-blue-950/50 text-blue-700 dark:text-blue-300 border border-blue-200/60 dark:border-blue-800/40 text-[11px]">
+                        {row.segment || row.package_type || 'Ground Advantage'}
                       </span>
                     </td>
+                    <td className="py-3 px-4 font-mono font-bold text-zinc-900 dark:text-zinc-100">
+                      ${Number(row.amount || row.revenue || 0).toFixed(2)}
+                    </td>
                     <td className="py-3 px-4 text-zinc-500 dark:text-zinc-400 truncate max-w-[140px]">
-                      {row.region}
-                    </td>
-                    <td className="py-3 px-4 font-mono font-semibold text-zinc-900 dark:text-zinc-100">
-                      ${row.amount?.toLocaleString()}
-                    </td>
-                    <td className="py-3 px-4 w-36">
-                      <div className="flex items-center gap-2">
-                        <div className="w-20 bg-zinc-200 dark:bg-zinc-800 h-1.5 rounded-full overflow-hidden">
-                          <div className={`h-full ${barColor}`} style={{ width: `${riskPct}%` }} />
-                        </div>
-                        <span className="font-mono text-[10px] text-zinc-400">{riskPct.toFixed(0)}%</span>
-                      </div>
+                      {row.region || row.destination || 'Hub'}
                     </td>
                     <td className="py-3 px-4">
                       <span className={`px-2 py-0.5 rounded-full text-[10px] font-medium ${
-                        row.status === 'Completed' ? 'bg-emerald-100 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-300' :
-                        row.status === 'Pending' ? 'bg-amber-100 dark:bg-amber-950/40 text-amber-700 dark:text-amber-300' :
-                        'bg-rose-100 dark:bg-rose-950/40 text-rose-700 dark:text-rose-300'
+                        row.status === 'Completed' || row.status === 'Delivered' ? 'bg-emerald-100 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-300' :
+                        row.status === 'Pending' || row.status === 'In Transit' ? 'bg-amber-100 dark:bg-amber-950/40 text-amber-700 dark:text-amber-300' :
+                        'bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-400'
                       }`}>
-                        {row.status}
+                        {row.status || 'Active'}
                       </span>
                     </td>
                   </tr>

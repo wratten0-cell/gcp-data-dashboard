@@ -128,7 +128,7 @@ export function GcpSettingsModal() {
               type="text"
               value={datasetId}
               onChange={(e) => setDatasetId(e.target.value)}
-              placeholder="e.g., analytics_production"
+              placeholder="e.g., uploadeddataset"
               className="w-full px-3 py-2 rounded-lg bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 text-zinc-900 dark:text-zinc-100 focus:outline-none focus:ring-1 focus:ring-blue-500 font-mono"
             />
           </div>

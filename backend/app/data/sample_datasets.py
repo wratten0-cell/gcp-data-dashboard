@@ -2,7 +2,7 @@ import math
 import random
 from datetime import datetime, timedelta
 
-def generate_ecommerce_data():
+def generate_package_data():
     base_date = datetime.now() - timedelta(days=60)
     package_types = [
         "Ground Advantage",

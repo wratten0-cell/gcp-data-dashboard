@@ -150,12 +150,12 @@ export function ChatPanel() {
       {
         id: 'welcome',
         role: 'assistant',
-        content: `Chat session reset. What would you like to explore across your Google Cloud datasets?`,
+        content: `Chat session reset. Connected to \`tribal-datum-507019-m0.uploadeddataset.packages\`. What would you like to analyze?`,
         thoughts: [],
         suggestions: [
-          'Show top 5 revenue categories',
-          'Run churn prediction model',
-          'Compare regional compute latency',
+          'What about the average price for each type of package?',
+          'Show standard deviation of revenue',
+          'How many Ground Advantage packages were there?',
         ],
       },
     ]);

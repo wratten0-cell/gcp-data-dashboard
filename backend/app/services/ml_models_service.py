@@ -39,13 +39,13 @@ class MLModelsService:
             },
             {
                 "id": "bqml-key-drivers",
-                "name": "Customer Churn Key Drivers Analysis",
+                "name": "USPS Package Revenue Key Drivers Analysis",
                 "engine": "BigQuery ML (AI.KEY_DRIVERS / CONTRIBUTION_ANALYSIS)",
                 "type": "driver_analysis",
-                "description": "Identifies high-impact causal features driving customer churn and retention.",
-                "dataset": f"{settings.BQ_DATASET_ID}.churn_driver_model",
+                "description": "Identifies high-impact features driving package revenue and postage.",
+                "dataset": f"{settings.BQ_DATASET_ID}.packages_driver_model",
                 "parameters": [
-                    {"name": "target_metric", "type": "string", "default": "churn_risk_score", "label": "Target Metric"}
+                    {"name": "target_metric", "type": "string", "default": "Revenue", "label": "Target Metric"}
                 ]
             },
             {
@@ -119,9 +119,9 @@ class MLModelsService:
             return {
                 "success": True,
                 "model_id": model_id,
-                "model_name": "Customer Churn Key Drivers (AI.KEY_DRIVERS)",
+                "model_name": "USPS Package Revenue Key Drivers (AI.KEY_DRIVERS)",
                 "type": "driver_analysis",
-                "target_metric": parameters.get("target_metric", "churn_risk_score"),
+                "target_metric": parameters.get("target_metric", "Revenue"),
                 "summary": {
                     "top_driver": data[0]["feature"],
                     "top_driver_impact": f"{data[0]['importance_score'] * 100:.1f}%",
@@ -138,17 +138,17 @@ class MLModelsService:
             
             # Regression formula simulation
             ltv = round(spend * 12 * (1.0 + tenure / 36.0) * max(0.6, 1.0 - (tickets * 0.08)), 2)
-            churn_prob = round(min(0.95, max(0.05, 0.15 + (tickets * 0.12) - (tenure * 0.005))), 3)
+            variance_confidence = round(min(0.98, max(0.85, 0.95 - (tickets * 0.02))), 3)
             
             return {
                 "success": True,
                 "model_id": model_id,
-                "model_name": "Vertex AI Customer LTV Predictor",
+                "model_name": "Vertex AI Package LTV Predictor",
                 "type": "regression_inference",
                 "prediction": {
                     "predicted_12m_ltv": f"${ltv:,.2f}",
                     "raw_ltv": ltv,
-                    "estimated_churn_probability": f"{churn_prob * 100:.1f}%",
+                    "variance_confidence": f"{variance_confidence * 100:.1f}%",
                     "customer_tier": "VIP Tier 1" if ltv > 60000 else "Standard Enterprise",
                     "confidence_score": 0.94
                 },

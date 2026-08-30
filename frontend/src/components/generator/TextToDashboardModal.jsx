@@ -79,7 +79,7 @@ export function TextToDashboardModal() {
               rows={3}
               value={prompt}
               onChange={(e) => setPrompt(e.target.value)}
-              placeholder="e.g., Create a customer retention and churn dashboard with support ticket correlations..."
+              placeholder="e.g., Show standard deviation of revenue, or compare Ground Advantage vs Priority Mail..."
               className="w-full bg-transparent p-3 text-xs text-zinc-900 dark:text-zinc-100 placeholder-zinc-400 focus:outline-none resize-none"
             />
 

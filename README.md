@@ -25,7 +25,7 @@ A full-stack, enterprise analytics platform built with **React (Vite + Tailwind 
    - **Vertex AI Custom Endpoints**: Predict real-time Customer Lifetime Value (LTV) and risk scores.
 
 4. **Dynamic Text-to-Dashboard Generator**:
-   - Plain-text prompt to full dashboard generator (e.g. *"Create an executive churn risk dashboard with Q4 revenue forecast"*).
+   - Plain-text prompt to full dashboard generator (e.g. *"Show standard deviation of revenue, or compare Ground Advantage vs Priority Mail"*).
    - AI synthesizes BigQuery SQL, KPIs, and ECharts visual configurations dynamically, rendering a brand new interactive dashboard tab on the fly.
 
 5. **Dual-Mode Engine (Live GCP + Demo Sandbox)**:
