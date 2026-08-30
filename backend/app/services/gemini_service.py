@@ -4,7 +4,7 @@ import json
 import uuid
 import asyncio
 import logging
-from typing import AsyncGenerator, Dict, Any, List
+from typing import AsyncGenerator, Dict, Any, List, Optional
 import httpx
 from google.api_core.client_options import ClientOptions
 from app.config import settings
@@ -28,6 +28,7 @@ except ImportError:
 class GeminiService:
     def __init__(self):
         self._analytics_client = None
+        self._active_conversation_name: Optional[str] = None
 
     def get_analytics_client(self):
         """
@@ -45,6 +46,61 @@ class GeminiService:
             return self._analytics_client
         except Exception as e:
             logger.warning(f"Could not initialize DataChatServiceClient with endpoint {US_ENDPOINT}: {e}")
+            return None
+
+    def _get_or_create_conversation_sdk(self, client, agent_path: str) -> str:
+        """
+        Creates an actual Conversation resource on Google's servers before chatting.
+        This prevents the 404 Resource Not Found error.
+        """
+        if self._active_conversation_name:
+            return self._active_conversation_name
+        
+        try:
+            conv_id = f"conv-{uuid.uuid4().hex[:12]}"
+            create_req = gemini_analytics.CreateConversationRequest(
+                parent=f"projects/{settings.GCP_PROJECT_ID}/locations/us",
+                conversation_id=conv_id,
+                conversation=gemini_analytics.Conversation(agents=[agent_path]),
+            )
+            created_conv = client.create_conversation(request=create_req)
+            self._active_conversation_name = created_conv.name
+            logger.info(f"Successfully created Google Cloud Conversation: {self._active_conversation_name}")
+            return self._active_conversation_name
+        except Exception as e:
+            logger.warning(f"create_conversation SDK error: {e}")
+            return None
+
+    async def _get_or_create_conversation_rest(self, token: str, agent_path: str) -> Optional[str]:
+        """
+        Creates an actual Conversation resource on Google's servers via REST.
+        """
+        if self._active_conversation_name:
+            return self._active_conversation_name
+        
+        conv_id = f"conv-{uuid.uuid4().hex[:12]}"
+        url = f"https://{US_ENDPOINT}/v1beta/projects/{settings.GCP_PROJECT_ID}/locations/us/conversations?conversationId={conv_id}"
+        headers = {
+            "Authorization": f"Bearer {token}",
+            "Content-Type": "application/json"
+        }
+        payload = {
+            "agents": [agent_path]
+        }
+        try:
+            async with httpx.AsyncClient(timeout=30.0) as http_client:
+                resp = await http_client.post(url, headers=headers, json=payload)
+                if resp.status_code == 200:
+                    data = resp.json()
+                    self._active_conversation_name = data.get("name")
+                    logger.info(f"REST created Google Cloud Conversation: {self._active_conversation_name}")
+                    return self._active_conversation_name
+                else:
+                    err_text = resp.text
+                    logger.warning(f"REST create_conversation returned {resp.status_code}: {err_text}")
+                    return None
+        except Exception as e:
+            logger.warning(f"REST create_conversation exception: {e}")
             return None
 
     def _process_system_message(self, sys_msg: Any) -> List[Dict[str, Any]]:
@@ -103,18 +159,20 @@ class GeminiService:
         agent_path: str
     ) -> AsyncGenerator[str, None]:
         """
-        Executes query via DataChatServiceClient with valid Protobuf fields.
+        Executes query via DataChatServiceClient with a verified server-created conversation.
         """
-        conv_id = f"projects/{settings.GCP_PROJECT_ID}/locations/us/conversations/{uuid.uuid4()}"
+        # Create or retrieve verified Conversation resource on Google's servers
+        conversation_name = self._get_or_create_conversation_sdk(client, agent_path)
+        if not conversation_name:
+            raise RuntimeError("Failed to create server-side Conversation resource on Google Cloud.")
 
         conversation_ref = gemini_analytics.ConversationReference(
-            conversation=conv_id,
+            conversation=conversation_name,
             data_agent_context=gemini_analytics.DataAgentContext(
                 data_agent=agent_path
             )
         )
 
-        # UserMessage only accepts text
         user_msg = gemini_analytics.UserMessage(text=message)
 
         chat_request = gemini_analytics.ChatRequest(
@@ -123,16 +181,22 @@ class GeminiService:
             conversation_reference=conversation_ref,
         )
 
-        response_stream = client.chat(request=chat_request)
-        for chunk in response_stream:
-            sys_msg = chunk.system_message
-            if not sys_msg:
-                continue
-            for event in self._process_system_message(sys_msg):
-                yield f"data: {json.dumps(event)}\n\n"
-                await asyncio.sleep(0.04)
+        try:
+            response_stream = client.chat(request=chat_request)
+            for chunk in response_stream:
+                sys_msg = chunk.system_message
+                if not sys_msg:
+                    continue
+                for event in self._process_system_message(sys_msg):
+                    yield f"data: {json.dumps(event)}\n\n"
+                    await asyncio.sleep(0.04)
 
-        yield f"data: {json.dumps({'type': 'DONE'})}\n\n"
+            yield f"data: {json.dumps({'type': 'DONE'})}\n\n"
+        except Exception as e:
+            # If conversation was not found, reset cache
+            if "not found" in str(e).lower():
+                self._active_conversation_name = None
+            raise e
 
     async def _stream_via_rest(
         self, 
@@ -140,7 +204,7 @@ class GeminiService:
         agent_path: str
     ) -> AsyncGenerator[str, None]:
         """
-        Direct REST streaming endpoint using Google Cloud's Protobuf JSON format.
+        Direct REST streaming endpoint using a verified server-created Conversation.
         """
         import google.auth
         import google.auth.transport.requests
@@ -149,9 +213,10 @@ class GeminiService:
         credentials.refresh(google.auth.transport.requests.Request())
         token = credentials.token
 
-        conv_id = f"projects/{settings.GCP_PROJECT_ID}/locations/us/conversations/{uuid.uuid4()}"
+        conversation_name = await self._get_or_create_conversation_rest(token, agent_path)
+        if not conversation_name:
+            raise RuntimeError("Failed to create server-side Conversation resource via REST.")
 
-        # Standard Protobuf JSON payload accepted by geminidataanalytics
         payload = {
             "parent": f"projects/{settings.GCP_PROJECT_ID}/locations/us",
             "messages": [
@@ -162,7 +227,7 @@ class GeminiService:
                 }
             ],
             "conversationReference": {
-                "conversation": conv_id,
+                "conversation": conversation_name,
                 "dataAgentContext": {
                     "dataAgent": agent_path
                 }
@@ -180,6 +245,8 @@ class GeminiService:
             async with http_client.stream("POST", url, headers=headers, json=payload) as response:
                 if response.status_code != 200:
                     err_body = await response.aread()
+                    if response.status_code == 404:
+                        self._active_conversation_name = None
                     raise RuntimeError(f"HTTP {response.status_code}: {err_body.decode('utf-8')}")
 
                 buffer = ""
@@ -222,7 +289,7 @@ class GeminiService:
     async def stream_chat(self, message: str, history: List[Dict[str, str]] = None) -> AsyncGenerator[str, None]:
         """
         Executes query directly on your BigQuery Data Agent.
-        Tries official gRPC SDK first, then HTTPS REST.
+        Initializes server-side conversation resource on Google Cloud first.
         """
         history = history or []
         agent_id = settings.DATA_AGENT_ID
@@ -238,7 +305,7 @@ class GeminiService:
         analytics_client = self.get_analytics_client()
         if analytics_client is not None:
             try:
-                yield f"data: {json.dumps({'type': 'THOUGHT', 'content': 'Dispatching to BigQuery Data Agent via gRPC SDK...'})}\n\n"
+                yield f"data: {json.dumps({'type': 'THOUGHT', 'content': 'Ensuring server-side Conversation is active on Google Cloud...'})}\n\n"
                 async for chunk in self._stream_via_sdk(analytics_client, message, agent_path):
                     yield chunk
                 return
