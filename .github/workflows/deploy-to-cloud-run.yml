@@ -52,7 +52,7 @@ jobs:
             --platform=managed \
             --allow-unauthenticated \
             --service-account="gcp-dashboard-sa@${{ env.PROJECT_ID }}.iam.gserviceaccount.com" \
-            --set-env-vars="GCP_PROJECT_ID=${{ env.PROJECT_ID }},ENVIRONMENT=production,DEMO_MODE=false,BQ_DATASET_ID=uploadeddataset"
+            --set-env-vars="GCP_PROJECT_ID=${{ env.PROJECT_ID }},ENVIRONMENT=production,DEMO_MODE=false,BQ_DATASET_ID=uploadeddataset,DATA_AGENT_ID=agent_c4a8c97f-d9a1-47ea-a65d-bfe6f2797718,DATA_AGENT_PATH=projects/${{ env.PROJECT_ID }}/locations/us/dataAgents/agent_c4a8c97f-d9a1-47ea-a65d-bfe6f2797718"
 
       - name: Show Cloud Run Output URL
         run: |-
