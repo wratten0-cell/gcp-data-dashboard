@@ -16,6 +16,13 @@ class Settings(BaseSettings):
     GEMINI_API_KEY: Optional[str] = os.getenv("GEMINI_API_KEY", "")
     GEMINI_MODEL: str = os.getenv("GEMINI_MODEL", "gemini-2.0-flash")
     
+    # BigQuery Data Agent (Conversational Analytics API)
+    DATA_AGENT_ID: str = os.getenv("DATA_AGENT_ID", "agent_c4a8c97f-d9a1-47ea-a65d-bfe6f2797718")
+    DATA_AGENT_PATH: str = os.getenv(
+        "DATA_AGENT_PATH",
+        "projects/tribal-datum-507019-m0/locations/us/dataAgents/agent_c4a8c97f-d9a1-47ea-a65d-bfe6f2797718"
+    )
+    
     # Auth credentials
     GOOGLE_APPLICATION_CREDENTIALS: Optional[str] = os.getenv("GOOGLE_APPLICATION_CREDENTIALS", None)
 
