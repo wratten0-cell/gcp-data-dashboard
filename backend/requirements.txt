@@ -6,6 +6,7 @@ python-dotenv>=1.0.1
 sse-starlette>=2.0.0
 google-cloud-bigquery>=3.17.0
 google-cloud-aiplatform>=1.43.0
+google-cloud-geminidataanalytics>=0.1.0
 google-genai>=0.1.1
 pandas>=2.2.0
 numpy>=1.26.0
