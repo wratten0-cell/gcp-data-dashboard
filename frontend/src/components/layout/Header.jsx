@@ -89,14 +89,6 @@ export function Header() {
             <span className="hidden md:inline">Assistant</span>
           </button>
 
-          {/* GCP Config Gear */}
-          <button
-            onClick={() => setIsSettingsOpen(true)}
-            title="Settings"
-            className="p-1.5 rounded-lg border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 text-zinc-600 dark:text-zinc-400 hover:bg-zinc-50 dark:hover:bg-zinc-850 transition-colors"
-          >
-            <Settings className="w-4 h-4" />
-          </button>
 
           {/* Dark/Light Theme Toggle */}
           <button

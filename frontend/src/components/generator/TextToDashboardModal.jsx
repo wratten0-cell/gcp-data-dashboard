@@ -4,10 +4,10 @@ import { useApp } from '../../context/AppContext';
 import { generateDashboardFromText } from '../../services/api';
 
 const EXAMPLE_PROMPTS = [
-  'Analyze Ground Advantage vs other package types with volume and revenue comparison',
-  'Show the revenue dot plot distribution and highest earning shipments',
-  'Create a breakdown of total packages and shipping revenue by service tier',
-  'Compare average revenue per package across categories',
+  'Show standard deviation and variance of package revenue',
+  'Compare average price between Ground Advantage and Priority Mail',
+  'Revenue dot plot dispersion across shipping tiers',
+  'Analyze Ground Advantage volume (60 packages) vs Priority Mail',
 ];
 
 export function TextToDashboardModal() {

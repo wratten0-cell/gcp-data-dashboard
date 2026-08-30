@@ -204,7 +204,7 @@ export function OverviewDashboard() {
           title="Number of Packages by Type"
           description={`Showing volume breakdown for the ${pkgTypes.length} package types in tribal-datum-507019-m0.uploadeddataset.packages`}
           option={packagesByTypeOption}
-          sql="SELECT package_type, COUNT(*) as count, SUM(revenue) as total_revenue FROM `tribal-datum-507019-m0.uploadeddataset.packages` GROUP BY package_type;"
+          sql="SELECT `Type`, COUNT(*) as count, ROUND(AVG(`Revenue`), 2) as avg_price, ROUND(SUM(`Revenue`), 2) as total_revenue FROM `tribal-datum-507019-m0.uploadeddataset.packages` GROUP BY `Type`;"
           height={360}
         />
 
@@ -213,7 +213,7 @@ export function OverviewDashboard() {
           title="Revenue Dot Plot Distribution"
           description={`Individual package revenues plotted for ${pkgTypes.join(' vs ')}`}
           option={revenueDotPlotOption}
-          sql="SELECT package_id, package_type, revenue FROM `tribal-datum-507019-m0.uploadeddataset.packages`;"
+          sql="SELECT `Type`, `Revenue` FROM `tribal-datum-507019-m0.uploadeddataset.packages`;"
           height={360}
         />
       </div>
@@ -224,7 +224,7 @@ export function OverviewDashboard() {
           title="Total Revenue Share by Package Type"
           description="Revenue split between package categories"
           option={revenueShareOption}
-          sql="SELECT package_type, SUM(revenue) as total_revenue FROM `tribal-datum-507019-m0.uploadeddataset.packages` GROUP BY package_type;"
+          sql="SELECT `Type`, ROUND(SUM(`Revenue`), 2) as total_revenue FROM `tribal-datum-507019-m0.uploadeddataset.packages` GROUP BY `Type`;"
           height={340}
         />
       </div>

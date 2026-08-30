@@ -5,20 +5,20 @@ import { useApp } from '../../context/AppContext';
 
 const PRESET_QUERIES = [
   {
-    name: 'Packages by Type & Total Revenue',
-    sql: 'SELECT package_type, COUNT(*) as count, ROUND(SUM(revenue), 2) as total_revenue, ROUND(AVG(revenue), 2) as avg_revenue FROM `tribal-datum-507019-m0.uploadeddataset.packages` GROUP BY package_type ORDER BY total_revenue DESC;'
+    name: 'Average Price & Count by Type',
+    sql: 'SELECT `Type`, COUNT(*) as Total_Packages, ROUND(AVG(`Revenue`), 2) as Average_Price, ROUND(SUM(`Revenue`), 2) as Total_Revenue FROM `tribal-datum-507019-m0.uploadeddataset.packages` GROUP BY `Type` ORDER BY Total_Revenue DESC;'
   },
   {
-    name: 'Top 20 Highest Revenue Packages',
-    sql: 'SELECT package_id, package_type, revenue, weight_kg, destination, status, timestamp FROM `tribal-datum-507019-m0.uploadeddataset.packages` ORDER BY revenue DESC LIMIT 20;'
+    name: 'Standard Deviation of Revenue by Type',
+    sql: 'SELECT `Type`, ROUND(STDDEV(`Revenue`), 2) as Std_Deviation, ROUND(AVG(`Revenue`), 2) as Mean_Price, ROUND(MIN(`Revenue`), 2) as Min_Price, ROUND(MAX(`Revenue`), 2) as Max_Price FROM `tribal-datum-507019-m0.uploadeddataset.packages` GROUP BY `Type`;'
   },
   {
-    name: 'Revenue Distribution by Destination',
-    sql: 'SELECT destination, COUNT(*) as packages_count, ROUND(SUM(revenue), 2) as total_revenue FROM `tribal-datum-507019-m0.uploadeddataset.packages` GROUP BY destination ORDER BY total_revenue DESC;'
+    name: 'Ground Advantage Packages Breakdown',
+    sql: 'SELECT * FROM `tribal-datum-507019-m0.uploadeddataset.packages` WHERE `Type` = \'Ground Advantage\' LIMIT 50;'
   },
   {
     name: 'Overall Total Revenue & Package Count',
-    sql: 'SELECT COUNT(*) as total_packages, ROUND(SUM(revenue), 2) as total_revenue, ROUND(AVG(revenue), 2) as avg_revenue_per_package FROM `tribal-datum-507019-m0.uploadeddataset.packages`;'
+    sql: 'SELECT COUNT(*) as total_packages, ROUND(SUM(`Revenue`), 2) as total_revenue, ROUND(AVG(`Revenue`), 2) as avg_revenue_per_package FROM `tribal-datum-507019-m0.uploadeddataset.packages`;'
   }
 ];
 

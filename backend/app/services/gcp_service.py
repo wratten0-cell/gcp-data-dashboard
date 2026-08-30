@@ -37,9 +37,9 @@ class GCPService:
             return self._schema_cache
 
         client = self.get_bq_client()
-        type_col = "package_type"
-        rev_col = "revenue"
-        all_cols = ["package_id", "package_type", "revenue", "weight_kg", "destination", "status", "timestamp"]
+        type_col = "Type"
+        rev_col = "Revenue"
+        all_cols = ["Type", "Revenue"]
 
         if client is not None:
             try:

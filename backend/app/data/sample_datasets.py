@@ -5,8 +5,8 @@ from datetime import datetime, timedelta
 def generate_ecommerce_data():
     base_date = datetime.now() - timedelta(days=60)
     package_types = [
-        "Package Type 1",
-        "Package Type 2"
+        "Ground Advantage",
+        "Priority Mail"
     ]
     
     destinations = [
@@ -14,10 +14,10 @@ def generate_ecommerce_data():
         "Seattle, WA", "Atlanta, GA"
     ]
 
-    # Exactly 2 package types
+    # Real USPS Package types from tribal-datum-507019-m0.uploadeddataset.packages
     type_profiles = {
-        "Package Type 1": {"count": 1420, "min_rev": 25.0, "max_rev": 380.0, "avg_weight": 5.5},
-        "Package Type 2": {"count": 980, "min_rev": 65.0, "max_rev": 750.0, "avg_weight": 12.0},
+        "Ground Advantage": {"count": 60, "min_rev": 6.80, "max_rev": 12.50, "avg_rev": 9.53, "avg_weight": 0.8},
+        "Priority Mail": {"count": 40, "min_rev": 7.50, "max_rev": 14.20, "avg_rev": 9.98, "avg_weight": 1.4},
     }
 
     packages_by_type = []
